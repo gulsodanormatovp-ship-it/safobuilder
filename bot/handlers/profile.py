@@ -2,7 +2,7 @@ from aiogram import F, Router
 from aiogram.types import Message
 from sqlalchemy import func, select
 
-from bot.keyboards import WEBAPP_BASE_URL
+from bot.keyboards import PUBLIC_BASE_URL, WEBAPP_BASE_URL
 from database.db import get_session
 from database.models import Bot, BotStatus, Referral, User
 
@@ -68,7 +68,7 @@ async def open_website(message: Message) -> None:
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🚀 Tez kirish (Telegram ichida)",
                                web_app={"url": f"{WEBAPP_BASE_URL}?mode=admin"})],
-        [InlineKeyboardButton(text="🌐 Brauzerda ochish", url="https://sizning-domen.uz")],
+        [InlineKeyboardButton(text="🌐 Brauzerda ochish", url=WEBAPP_BASE_URL)],
     ])
     await message.answer(
         "🌐 <b>Saytga kirish</b>\n\nQuyidagi tugmalardan birini tanlang:",
