@@ -1,4 +1,5 @@
 import os
+import json
 import re
 
 import httpx
@@ -138,6 +139,7 @@ async def receive_token(message: Message, state: FSMContext) -> None:
             bot_token=token,
             bot_username=bot_username,
             display_name=bot_display_name,
+            settings_json=json.dumps({"owner_telegram_id": message.from_user.id}),
         )
         user.balance -= info.price
         session.add(new_bot)
