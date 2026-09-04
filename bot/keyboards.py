@@ -1,9 +1,12 @@
+import os
+
 from aiogram.types import (
     InlineKeyboardButton, InlineKeyboardMarkup,
     KeyboardButton, ReplyKeyboardMarkup,
 )
 
-WEBAPP_BASE_URL = "https://sizning-domen.uz/webapp"
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://sizning-domen.uz").rstrip("/")
+WEBAPP_BASE_URL = f"{PUBLIC_BASE_URL}/webapp"
 
 # ---- Asosiy menyu (screenshotlardagi 8 tugmali reply-klaviatura) ----
 MAIN_MENU = ReplyKeyboardMarkup(
