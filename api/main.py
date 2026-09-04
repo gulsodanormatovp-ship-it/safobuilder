@@ -29,7 +29,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from bot.child_bots import BOT_TYPE_REGISTRY
-from bot.handlers import create_bot, my_bots, payment, profile, start
+from bot.handlers import bot_settings, create_bot, my_bots, payment, profile, start
 from database.db import get_session, init_db
 from database.models import Bot as BotModel, BotStat, User
 
@@ -54,6 +54,7 @@ dp = Dispatcher(storage=MemoryStorage())
 dp.include_router(start.router)
 dp.include_router(create_bot.router)
 dp.include_router(my_bots.router)
+dp.include_router(bot_settings.router)
 dp.include_router(payment.router)
 dp.include_router(profile.router)
 
