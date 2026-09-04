@@ -1,12 +1,12 @@
 """
-FastAPI ilovasi ikkita vazifani bajaradi:
+FastAPI ilovasi endi UCHTA vazifani bajaradi (Render bepul tarifida
+bitta Web Service ichida ishlashi uchun):
 
-1. `/webhook/{bot_id}` — Telegramdan kelgan har bir update shu manzilga tushadi.
-   `bot_id` orqali DB'dan bot turi topiladi va mos ChildBot klassiga uzatiladi.
-   Shu tufayli 1 ta server minglab child botni bitta process ichida boshqaradi.
-
-2. `/api/*` — Telegram Mini App (webapp/) uchun REST endpointlar: statistika,
-   botlar ro'yxati, anketa natijalarini eksport qilish va h.k.
+1. `/platform-webhook` — SafoBuilder (platforma) botining o'zi shu yerga
+   webhook orqali ulanadi (polling emas) — shu tufayli alohida
+   "Background Worker" (pullik xizmat) kerak bo'lmaydi.
+2. `/webhook/{bot_id}` — foydalanuvchilar yaratgan child botlar shu yerga tushadi.
+3. `/api/*` — Mini App uchun REST API, `/webapp` — Mini App statik fayllari.
 """
 import csv
 import hashlib
@@ -17,6 +17,11 @@ import os
 from datetime import datetime, timedelta
 from urllib.parse import parse_qsl
 
+from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.types import Update
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
@@ -24,10 +29,12 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from bot.child_bots import BOT_TYPE_REGISTRY
+from bot.handlers import create_bot, my_bots, payment, profile, start
 from database.db import get_session, init_db
-from database.models import Bot, BotStat, User
+from database.models import Bot as BotModel, BotStat, User
 
 PLATFORM_BOT_TOKEN = os.getenv("PLATFORM_BOT_TOKEN", "")
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 
 app = FastAPI(title="SafoBuilder API")
 app.add_middleware(
@@ -35,10 +42,37 @@ app.add_middleware(
 )
 app.mount("/webapp", StaticFiles(directory="webapp", html=True), name="webapp")
 
+# ------------------------------------------------------------------
+# Platforma botini webhook rejimida sozlash
+# ------------------------------------------------------------------
+platform_bot = Bot(
+    token=PLATFORM_BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+) if PLATFORM_BOT_TOKEN else None
+
+dp = Dispatcher(storage=MemoryStorage())
+dp.include_router(start.router)
+dp.include_router(create_bot.router)
+dp.include_router(my_bots.router)
+dp.include_router(payment.router)
+dp.include_router(profile.router)
+
 
 @app.on_event("startup")
 async def on_startup() -> None:
     await init_db()
+    if platform_bot and PUBLIC_BASE_URL:
+        await platform_bot.set_webhook(f"{PUBLIC_BASE_URL}/platform-webhook")
+
+
+@app.post("/platform-webhook")
+async def platform_webhook(request: Request) -> dict:
+    if platform_bot is None:
+        raise HTTPException(status_code=500, detail="PLATFORM_BOT_TOKEN sozlanmagan")
+    data = await request.json()
+    update = Update.model_validate(data)
+    await dp.feed_webhook_update(platform_bot, update)
+    return {"ok": True}
 
 
 # ------------------------------------------------------------------
@@ -50,7 +84,7 @@ async def child_bot_webhook(bot_id: int, request: Request) -> dict:
     update = await request.json()
 
     async with get_session() as session:
-        result = await session.execute(select(Bot).where(Bot.id == bot_id))
+        result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
         bot_row = result.scalar_one_or_none()
 
     if bot_row is None:
@@ -58,7 +92,6 @@ async def child_bot_webhook(bot_id: int, request: Request) -> dict:
 
     handler_cls = BOT_TYPE_REGISTRY.get(bot_row.bot_type)
     if handler_cls is None:
-        # Hali kod yozilmagan bot turi — README'dagi qadamlarga muvofiq qo'shiladi
         return {"ok": True, "note": f"{bot_row.bot_type} turi hali qo'llab-quvvatlanmaydi"}
 
     child_bot = handler_cls(bot_row)
@@ -68,7 +101,6 @@ async def child_bot_webhook(bot_id: int, request: Request) -> dict:
 
 
 async def _record_activity(bot_id: int, update: dict) -> None:
-    """Statistikani (Mini App dashboardidagi grafik) yangilaydi."""
     today = datetime.utcnow().date()
     async with get_session() as session:
         result = await session.execute(
@@ -94,12 +126,6 @@ async def _record_activity(bot_id: int, update: dict) -> None:
 # ------------------------------------------------------------------
 
 def verify_telegram_webapp_data(init_data: str) -> dict:
-    """
-    Telegram Mini App yuboradigan `initData`ni tekshiradi (rasmiy algoritm:
-    https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app).
-    Bu ishonchsiz kirishlarning oldini oladi — API'ga faqat haqiqiy Telegram
-    foydalanuvchisi kira oladi.
-    """
     parsed = dict(parse_qsl(init_data))
     received_hash = parsed.pop("hash", None)
     if not received_hash:
@@ -117,9 +143,8 @@ def verify_telegram_webapp_data(init_data: str) -> dict:
 
 @app.get("/api/bots/{bot_id}")
 async def get_bot_public_info(bot_id: int) -> dict:
-    """Mini App foydalanuvchi rejimi uchun bot turini va ochiq sozlamalarini beradi."""
     async with get_session() as session:
-        result = await session.execute(select(Bot).where(Bot.id == bot_id))
+        result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
         bot_row = result.scalar_one_or_none()
 
     if bot_row is None:
@@ -133,7 +158,6 @@ async def get_bot_public_info(bot_id: int) -> dict:
         "username": bot_row.bot_username,
         "tariff": bot_row.tariff,
         "status": bot_row.status,
-        # faqat foydalanuvchiga kerakli, maxfiy bo'lmagan sozlamalar
         "questions": settings.get("questions", []) if bot_row.bot_type == "anketa" else None,
     }
 
@@ -178,7 +202,7 @@ async def get_me(init_data: str) -> dict:
         if user is None:
             raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
 
-        bots_result = await session.execute(select(Bot).where(Bot.owner_id == user.id))
+        bots_result = await session.execute(select(BotModel).where(BotModel.owner_id == user.id))
         bots = bots_result.scalars().all()
 
     return {
@@ -193,9 +217,8 @@ async def get_me(init_data: str) -> dict:
 
 @app.get("/api/bots/{bot_id}/anketa-export")
 async def export_anketa(bot_id: int) -> StreamingResponse:
-    """Anketa Bot javoblarini CSV holida eksport qiladi."""
     async with get_session() as session:
-        result = await session.execute(select(Bot).where(Bot.id == bot_id))
+        result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
         bot_row = result.scalar_one_or_none()
 
     if bot_row is None or bot_row.bot_type != "anketa":
@@ -217,3 +240,9 @@ async def export_anketa(bot_id: int) -> StreamingResponse:
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=anketa_{bot_id}.csv"},
     )
+
+
+@app.get("/")
+async def health_check() -> dict:
+    """Render'ning \"health check\" so'rovlari uchun — xizmat tirikligini bildiradi."""
+    return {"status": "ok", "service": "SafoBuilder API"}
