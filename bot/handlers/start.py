@@ -32,8 +32,9 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
         )
         user = result.scalar_one_or_none()
 
-        is_new = user is None
         if user is None:
+            # Middleware odatda buni allaqachon yaratgan bo'ladi, lekin
+            # ehtiyot chorasi sifatida shu yerda ham tekshiramiz.
             user = User(
                 telegram_id=message.from_user.id,
                 username=message.from_user.username,
@@ -42,16 +43,21 @@ async def cmd_start(message: Message, command: CommandObject) -> None:
             session.add(user)
             await session.flush()
 
-            # Referal orqali kirgan bo'lsa — start=<referrer_telegram_id>
-            if command.args and command.args.isdigit():
-                ref_result = await session.execute(
-                    select(User).where(User.telegram_id == int(command.args))
-                )
-                referrer = ref_result.scalar_one_or_none()
-                if referrer and referrer.id != user.id:
-                    session.add(Referral(referrer_id=referrer.id, referred_id=user.id))
-                    referrer.balance += 500  # bonus — .env orqali sozlanadi
-            await session.commit()
+        # Referal bog'lanishi hali qilinmagan bo'lsa va havolada referrer
+        # ko'rsatilgan bo'lsa — bog'laymiz va bonus beramiz. `is_new`ga
+        # emas, `referred_by`ning bo'shligiga qaraymiz, chunki foydalanuvchi
+        # bu nuqtaga kelguncha middleware orqali allaqachon yaratilgan bo'lishi mumkin.
+        if user.referred_by is None and command.args and command.args.isdigit():
+            ref_result = await session.execute(
+                select(User).where(User.telegram_id == int(command.args))
+            )
+            referrer = ref_result.scalar_one_or_none()
+            if referrer and referrer.id != user.id:
+                user.referred_by = referrer.id
+                session.add(Referral(referrer_id=referrer.id, referred_id=user.id))
+                referrer.balance += 500  # bonus — .env orqali sozlanadi
+
+        await session.commit()
 
     await message.answer(WELCOME_TEXT, reply_markup=MAIN_MENU)
 
