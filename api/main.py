@@ -30,6 +30,7 @@ from sqlalchemy import select
 
 from bot.child_bots import BOT_TYPE_REGISTRY
 from bot.handlers import bot_settings, create_bot, my_bots, payment, profile, start
+from bot.middlewares import EnsureUserMiddleware
 from database.db import get_session, init_db
 from database.models import Bot as BotModel, BotStat, User
 
@@ -51,6 +52,8 @@ platform_bot = Bot(
 ) if PLATFORM_BOT_TOKEN else None
 
 dp = Dispatcher(storage=MemoryStorage())
+dp.update.outer_middleware(EnsureUserMiddleware())
+
 dp.include_router(start.router)
 dp.include_router(create_bot.router)
 dp.include_router(my_bots.router)
