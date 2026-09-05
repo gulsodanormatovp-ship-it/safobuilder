@@ -99,6 +99,16 @@ async def child_bot_webhook(bot_id: int, request: Request) -> dict:
         return {"ok": True, "note": f"{bot_row.bot_type} turi hali qo'llab-quvvatlanmaydi"}
 
     child_bot = handler_cls(bot_row)
+    async with get_session() as session:
+        allowed = await child_bot.process_common_update(update, session)
+    if not allowed:
+        return {"ok": True, "note": "bloklangan yoki spam-limit"}
+
+    async with get_session() as session:
+        handled = await child_bot.handle_owner_commands(update, session)
+    if handled:
+        return {"ok": True, "note": "owner buyrug'i bajarildi"}
+
     await child_bot.handle_update(update)
     await _record_activity(bot_id, update)
     return {"ok": True}
