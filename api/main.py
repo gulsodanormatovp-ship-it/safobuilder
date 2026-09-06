@@ -17,6 +17,7 @@ import os
 from datetime import datetime, timedelta
 from urllib.parse import parse_qsl
 
+import httpx
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -26,11 +27,13 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from sqlalchemy import select
 
 from bot.child_bots import BOT_TYPE_REGISTRY
 from bot.handlers import bot_settings, create_bot, my_bots, payment, profile, start
 from bot.middlewares import EnsureUserMiddleware
+from bot.tariffs import TARIFFS
 from database.db import get_session, init_db
 from database.models import Bot as BotModel, BotStat, User
 
@@ -93,6 +96,24 @@ async def child_bot_webhook(bot_id: int, request: Request) -> dict:
 
     if bot_row is None:
         raise HTTPException(status_code=404, detail="Bot topilmadi")
+
+    if bot_row.expires_at and bot_row.expires_at < datetime.utcnow():
+        chat_id = (
+            (update.get("message") or {}).get("chat", {}).get("id")
+            or (update.get("callback_query") or {}).get("from", {}).get("id")
+        )
+        if chat_id:
+            async with httpx.AsyncClient(timeout=10) as client:
+                await client.post(
+                    f"https://api.telegram.org/bot{bot_row.bot_token}/sendMessage",
+                    json={
+                        "chat_id": chat_id,
+                        "text": "⏳ Ushbu botning obuna muddati tugagan. "
+                                "Bot egasi SafoBuilder platformasida tarifni "
+                                "yangilashi kerak.",
+                    },
+                )
+        return {"ok": True, "note": "obuna tugagan"}
 
     handler_cls = BOT_TYPE_REGISTRY.get(bot_row.bot_type)
     if handler_cls is None:
@@ -254,6 +275,190 @@ async def export_anketa(bot_id: int) -> StreamingResponse:
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename=anketa_{bot_id}.csv"},
     )
+
+
+async def _get_owned_bot(bot_id: int, init_data: str) -> BotModel:
+    """Bot mavjudligini va so'rovchi haqiqatan uning egasi ekanini tekshiradi."""
+    tg_user = verify_telegram_webapp_data(init_data)
+    async with get_session() as session:
+        result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
+        bot_row = result.scalar_one_or_none()
+        if bot_row is None:
+            raise HTTPException(status_code=404, detail="Bot topilmadi")
+
+        owner_result = await session.execute(select(User).where(User.id == bot_row.owner_id))
+        owner = owner_result.scalar_one()
+        if owner.telegram_id != tg_user.get("id"):
+            raise HTTPException(status_code=403, detail="Bu botga ruxsatingiz yo'q")
+
+    return bot_row
+
+
+@app.get("/api/bots/{bot_id}/users")
+async def list_bot_users(bot_id: int, init_data: str) -> dict:
+    bot_row = await _get_owned_bot(bot_id, init_data)
+    settings = json.loads(bot_row.settings_json or "{}")
+    blocked = set(settings.get("blocked_users", []))
+    known = settings.get("known_users", [])
+    return {
+        "total": len(known),
+        "blocked_count": len(blocked),
+        "users": [{"id": uid, "blocked": uid in blocked} for uid in known],
+    }
+
+
+class BroadcastRequest(BaseModel):
+    init_data: str
+    text: str
+
+
+@app.post("/api/bots/{bot_id}/broadcast")
+async def broadcast_via_miniapp(bot_id: int, payload: BroadcastRequest) -> dict:
+    bot_row = await _get_owned_bot(bot_id, payload.init_data)
+    settings = json.loads(bot_row.settings_json or "{}")
+    blocked = set(settings.get("blocked_users", []))
+    known = settings.get("known_users", [])
+
+    sent = 0
+    async with httpx.AsyncClient(timeout=10) as client:
+        for uid in known:
+            if uid in blocked:
+                continue
+            try:
+                resp = await client.post(
+                    f"https://api.telegram.org/bot{bot_row.bot_token}/sendMessage",
+                    json={"chat_id": uid, "text": payload.text},
+                )
+                if resp.json().get("ok"):
+                    sent += 1
+            except Exception:
+                pass
+
+    return {"sent": sent, "total": len(known)}
+
+
+class UserActionRequest(BaseModel):
+    init_data: str
+    user_id: int
+
+
+@app.post("/api/bots/{bot_id}/block")
+async def block_user_via_miniapp(bot_id: int, payload: UserActionRequest) -> dict:
+    bot_row = await _get_owned_bot(bot_id, payload.init_data)
+    async with get_session() as session:
+        result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
+        fresh_row = result.scalar_one()
+        settings = json.loads(fresh_row.settings_json or "{}")
+        blocked = settings.setdefault("blocked_users", [])
+        if payload.user_id not in blocked:
+            blocked.append(payload.user_id)
+        fresh_row.settings_json = json.dumps(settings)
+        await session.commit()
+    return {"ok": True}
+
+
+@app.post("/api/bots/{bot_id}/unblock")
+async def unblock_user_via_miniapp(bot_id: int, payload: UserActionRequest) -> dict:
+    bot_row = await _get_owned_bot(bot_id, payload.init_data)
+    async with get_session() as session:
+        result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
+        fresh_row = result.scalar_one()
+        settings = json.loads(fresh_row.settings_json or "{}")
+        blocked = settings.setdefault("blocked_users", [])
+        if payload.user_id in blocked:
+            blocked.remove(payload.user_id)
+        fresh_row.settings_json = json.dumps(settings)
+        await session.commit()
+    return {"ok": True}
+
+
+EDITABLE_SETTINGS_KEYS = (
+    "questions", "driver_group_id", "price", "channel_id",
+    "prize_text", "bonus_per_invite", "services", "candidates",
+    "kitchen_group_id",
+)
+
+
+@app.get("/api/bots/{bot_id}/settings")
+async def get_bot_settings(bot_id: int, init_data: str) -> dict:
+    bot_row = await _get_owned_bot(bot_id, init_data)
+    settings = json.loads(bot_row.settings_json or "{}")
+    return {"settings": {k: v for k, v in settings.items() if k in EDITABLE_SETTINGS_KEYS}}
+
+
+class SettingsUpdateRequest(BaseModel):
+    init_data: str
+    settings: dict
+
+
+@app.post("/api/bots/{bot_id}/settings")
+async def update_bot_settings(bot_id: int, payload: SettingsUpdateRequest) -> dict:
+    await _get_owned_bot(bot_id, payload.init_data)
+    async with get_session() as session:
+        result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
+        fresh_row = result.scalar_one()
+        settings = json.loads(fresh_row.settings_json or "{}")
+        for key, value in payload.settings.items():
+            if key in EDITABLE_SETTINGS_KEYS:
+                settings[key] = value
+        fresh_row.settings_json = json.dumps(settings)
+        await session.commit()
+    return {"ok": True}
+
+
+@app.get("/api/bots/{bot_id}/subscription")
+async def get_subscription(bot_id: int, init_data: str) -> dict:
+    bot_row = await _get_owned_bot(bot_id, init_data)
+    return {
+        "current_tariff": bot_row.tariff,
+        "expires_at": bot_row.expires_at.isoformat() if bot_row.expires_at else None,
+        "is_expired": bool(bot_row.expires_at and bot_row.expires_at < datetime.utcnow()),
+        "options": [
+            {"key": t.key, "title": t.title, "price": t.price, "duration_days": t.duration_days,
+             "daily_limit": t.daily_limit}
+            for t in TARIFFS.values() if not t.is_trial
+        ],
+    }
+
+
+class RenewRequest(BaseModel):
+    init_data: str
+    tariff_key: str
+
+
+@app.post("/api/bots/{bot_id}/subscription/renew")
+async def renew_subscription(bot_id: int, payload: RenewRequest) -> dict:
+    tariff = TARIFFS.get(payload.tariff_key)
+    if tariff is None or tariff.is_trial:
+        raise HTTPException(status_code=400, detail="Noto'g'ri tarif")
+
+    tg_user = verify_telegram_webapp_data(payload.init_data)
+    async with get_session() as session:
+        result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
+        bot_row = result.scalar_one_or_none()
+        if bot_row is None:
+            raise HTTPException(status_code=404, detail="Bot topilmadi")
+
+        owner_result = await session.execute(select(User).where(User.id == bot_row.owner_id))
+        owner = owner_result.scalar_one()
+        if owner.telegram_id != tg_user.get("id"):
+            raise HTTPException(status_code=403, detail="Ruxsat yo'q")
+
+        if owner.balance < tariff.price:
+            raise HTTPException(status_code=402, detail="Balans yetarli emas")
+
+        owner.balance -= tariff.price
+        base_time = (
+            bot_row.expires_at
+            if bot_row.expires_at and bot_row.expires_at > datetime.utcnow()
+            else datetime.utcnow()
+        )
+        bot_row.tariff = tariff.key
+        bot_row.expires_at = base_time + timedelta(days=tariff.duration_days)
+        await session.commit()
+        new_expiry = bot_row.expires_at.isoformat()
+
+    return {"ok": True, "new_expiry": new_expiry}
 
 
 @app.get("/")
