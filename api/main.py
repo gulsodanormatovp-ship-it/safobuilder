@@ -73,7 +73,7 @@ def _is_duplicate_update(scope: str, update_id: int | None) -> bool:
         _seen_update_keys.discard(oldest)
     return False
 
-app = FastAPI(title="SafoBuilder API")
+app = FastAPI(title="Vezto API")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
 )
@@ -161,7 +161,7 @@ async def _process_child_bot_update(bot_id: int, update: dict) -> None:
                     json={
                         "chat_id": chat_id,
                         "text": "⏳ Ushbu botning obuna muddati tugagan. "
-                                "Bot egasi SafoBuilder platformasida tarifni "
+                                "Bot egasi Vezto platformasida tarifni "
                                 "yangilashi kerak.",
                     },
                 )
@@ -601,4 +601,4 @@ async def renew_subscription(bot_id: int, payload: RenewRequest) -> dict:
 @app.get("/")
 async def health_check() -> dict:
     """Render'ning \"health check\" so'rovlari uchun — xizmat tirikligini bildiradi."""
-    return {"status": "ok", "service": "SafoBuilder API"}
+    return {"status": "ok", "service": "Vezto API"}
