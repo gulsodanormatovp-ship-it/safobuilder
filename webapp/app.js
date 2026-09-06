@@ -378,7 +378,7 @@ async function renderPlatformDashboard() {
   try {
     platformMe = await fetchJSON(`${API_BASE}/api/me?init_data=${encodeURIComponent(initData)}`);
   } catch (e) {
-    app.innerHTML = `<div class="panel"><div class="empty-state">⚠️ Botni Telegram ichidan oching (SafoBuilder botiga /start yozing).</div></div>`;
+    app.innerHTML = `<div class="panel"><div class="empty-state">⚠️ Botni Telegram ichidan oching (Vezto botiga /start yozing).</div></div>`;
     return;
   }
 
@@ -386,7 +386,7 @@ async function renderPlatformDashboard() {
     <div class="header">
       <div class="avatar">🛡</div>
       <div>
-        <div class="title">SafoBuilder</div>
+        <div class="title">Vezto</div>
         <div class="subtitle">Telegram botlar platformasi</div>
       </div>
     </div>
@@ -580,7 +580,7 @@ function renderProfileTab(content) {
     </div>
     <div class="panel">
       <h3>💳 Hisobni to'ldirish</h3>
-      <p style="color:var(--hint); font-size:13.5px;">Balansni to'ldirish uchun SafoBuilder botiga qayting va "💳 Hisob to'ldirish" tugmasini bosing — u yerda karta raqami va chek yuborish tartibi ko'rsatilgan.</p>
+      <p style="color:var(--hint); font-size:13.5px;">Balansni to'ldirish uchun Vezto botiga qayting va "💳 Hisob to'ldirish" tugmasini bosing — u yerda karta raqami va chek yuborish tartibi ko'rsatilgan.</p>
     </div>
   `;
 }
@@ -598,7 +598,7 @@ function renderHelpTab(content) {
     </div>
     <div class="panel">
       <h3>📞 Yordam kerakmi?</h3>
-      <p style="color:var(--hint); font-size:13.5px;">SafoBuilder botiga qayting va "📩 Murojaat" bo'limidan admin bilan bog'laning.</p>
+      <p style="color:var(--hint); font-size:13.5px;">Vezto botiga qayting va "📩 Murojaat" bo'limidan admin bilan bog'laning.</p>
     </div>
   `;
 }
