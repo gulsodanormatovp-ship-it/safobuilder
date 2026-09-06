@@ -1,6 +1,7 @@
 import os
 import json
 import re
+from datetime import datetime, timedelta
 
 import httpx
 from aiogram import F, Router
@@ -139,6 +140,8 @@ async def receive_token(message: Message, state: FSMContext) -> None:
             bot_token=token,
             bot_username=bot_username,
             display_name=bot_display_name,
+            tariff="trial",
+            expires_at=datetime.utcnow() + timedelta(days=3),
             settings_json=json.dumps({"owner_telegram_id": message.from_user.id}),
         )
         user.balance -= info.price
@@ -160,7 +163,9 @@ async def receive_token(message: Message, state: FSMContext) -> None:
     await message.answer(
         f"✅ <b>{info.title}</b> muvaffaqiyatli yaratildi!\n\n"
         f"🤖 Bot: @{bot_username}\n"
-        f"🎁 30 kunlik bepul (Free) tarif faollashtirildi.\n\n"
+        f"🎁 3 kunlik BEPUL sinov muddati faollashtirildi.\n"
+        f"⏰ Sinov tugagach, botdan foydalanishni davom ettirish uchun "
+        f"tarif tanlashingiz kerak bo'ladi (\"Botlarim\" > bot > \"📊 Tarif\").\n\n"
         f"Botni sozlash uchun \"🤖 Botlarim\" bo'limiga o'ting.",
         reply_markup=MAIN_MENU,
     )
