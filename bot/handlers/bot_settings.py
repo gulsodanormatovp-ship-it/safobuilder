@@ -107,10 +107,10 @@ async def set_profile_description(message: Message, state: FSMContext) -> None:
 def tariff_menu(bot_id: int) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(
-            text=f"{t.title} — {t.price_per_month:,} so'm/oy".replace(",", " "),
+            text=f"{t.title} — {t.price:,} so'm".replace(",", " "),
             callback_data=f"buytariff:{bot_id}:{t.key}",
         )]
-        for t in TARIFFS.values()
+        for t in TARIFFS.values() if not t.is_trial
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -119,8 +119,11 @@ def tariff_menu(bot_id: int) -> InlineKeyboardMarkup:
 async def show_tariffs(callback: CallbackQuery) -> None:
     bot_id = int(callback.data.split(":", 1)[1])
     await callback.message.answer(
-        "📊 <b>Tariflar</b>\n\nHar bir tarif kunlik xabar/so'rov limitini belgilaydi:\n\n"
-        + "\n".join(f"{t.title} — {t.daily_limit:,} so'rov/kun".replace(",", " ") for t in TARIFFS.values()),
+        "📊 <b>Tariflar</b>\n\nHar bir tarif kunlik so'rov limitini belgilaydi:\n\n"
+        + "\n".join(
+            f"{t.title} — {t.duration_days} kun, {t.daily_limit:,} so'rov/kun".replace(",", " ")
+            for t in TARIFFS.values() if not t.is_trial
+        ),
         reply_markup=tariff_menu(bot_id),
     )
     await callback.answer()
@@ -139,24 +142,27 @@ async def buy_tariff(callback: CallbackQuery) -> None:
         user_result = await session.execute(select(User).where(User.id == bot_row.owner_id))
         user = user_result.scalar_one()
 
-        if tariff.price_per_month > 0 and user.balance < tariff.price_per_month:
+        if user.balance < tariff.price:
             await callback.answer(
-                f"⚠️ Balansda yetarli mablag' yo'q. Kerak: {tariff.price_per_month:,} so'm."
+                f"⚠️ Balansda yetarli mablag' yo'q. Kerak: {tariff.price:,} so'm."
                 .replace(",", " "),
                 show_alert=True,
             )
             return
 
-        if tariff.price_per_month > 0:
-            user.balance -= tariff.price_per_month
+        user.balance -= tariff.price
+
+        # Agar joriy tarif hali tugamagan bo'lsa, yangi muddat davom ettiriladi
+        # (uzaytiriladi), aks holda bugundan boshlab hisoblanadi.
+        base_time = bot_row.expires_at if bot_row.expires_at and bot_row.expires_at > datetime.utcnow() else datetime.utcnow()
 
         bot_row.tariff = tariff.key
-        bot_row.expires_at = datetime.utcnow() + timedelta(days=30)
+        bot_row.expires_at = base_time + timedelta(days=tariff.duration_days)
         await session.commit()
 
     await callback.message.answer(
         f"✅ <b>{tariff.title}</b> tarifiga o'tkazildi!\n"
-        f"📅 Amal qilish muddati: 30 kun\n"
+        f"📅 Amal qilish muddati: {tariff.duration_days} kun\n"
         f"⚡️ Kunlik limit: {tariff.daily_limit:,} so'rov".replace(",", " "),
     )
     await callback.answer("Tarif faollashtirildi ✅")
@@ -173,11 +179,11 @@ async def extend_tariff(callback: CallbackQuery) -> None:
     async with get_session() as session:
         result = await session.execute(select(Bot).where(Bot.id == bot_id))
         bot_row = result.scalar_one()
-        tariff = TARIFFS.get(bot_row.tariff, TARIFFS["free"])
+        tariff = TARIFFS.get(bot_row.tariff, TARIFFS["trial"])
 
     await callback.message.answer(
-        f"💰 Joriy tarifingiz: <b>{tariff.title}</b> ({tariff.price_per_month:,} so'm/oy)\n\n"
-        f"Muddatni 30 kunga uzaytirish uchun tarifni qayta tanlang:".replace(",", " "),
+        f"💰 Joriy tarifingiz: <b>{tariff.title}</b> ({tariff.price:,} so'm / {tariff.duration_days} kun)\n\n"
+        f"Muddatni uzaytirish uchun tarifni qayta tanlang:".replace(",", " "),
         reply_markup=tariff_menu(bot_id),
     )
     await callback.answer()
