@@ -23,7 +23,7 @@ async function main() {
   } else if (mode === "user" && botId) {
     await renderUserBotScreen(botId);
   } else {
-    await renderMyBotsOverview();
+    await renderPlatformDashboard();
   }
 }
 
@@ -367,17 +367,240 @@ function renderGenericPlaceholder(info) {
     <div class="panel"><p>Bu bot turi uchun Mini App interfeysi hali qo'shilmagan.</p></div>`;
 }
 
-async function renderMyBotsOverview() {
+// ==================== PLATFORM DASHBOARD (butun tizim) ====================
+
+let platformMe = null;
+let platformCatalog = null;
+let currentPlatformTab = "home";
+let selectedBotType = null;
+
+async function renderPlatformDashboard() {
   try {
-    const me = await fetchJSON(`${API_BASE}/api/me?init_data=${encodeURIComponent(initData)}`);
-    app.innerHTML = `
-      <div class="panel">
-        <h3>💼 Balans: ${me.balance.toLocaleString()} so'm</h3>
-        ${me.bots.map((b) => `<div class="row-item"><span>@${b.username}</span><span>${b.status}</span></div>`).join("")}
-      </div>`;
+    platformMe = await fetchJSON(`${API_BASE}/api/me?init_data=${encodeURIComponent(initData)}`);
   } catch (e) {
-    app.innerHTML = `<div class="panel"><div class="empty-state">⚠️ Botni Telegram ichidan oching.</div></div>`;
+    app.innerHTML = `<div class="panel"><div class="empty-state">⚠️ Botni Telegram ichidan oching (SafoBuilder botiga /start yozing).</div></div>`;
+    return;
   }
+
+  app.innerHTML = `
+    <div class="header">
+      <div class="avatar">🛡</div>
+      <div>
+        <div class="title">SafoBuilder</div>
+        <div class="subtitle">Telegram botlar platformasi</div>
+      </div>
+    </div>
+    <div class="nav-tabs" style="flex-wrap:wrap;">
+      <div class="nav-tab active" data-ptab="home">🏠 Bosh</div>
+      <div class="nav-tab" data-ptab="create">➕ Yaratish</div>
+      <div class="nav-tab" data-ptab="mybots">🤖 Botlarim</div>
+      <div class="nav-tab" data-ptab="referral">🗣 Referal</div>
+      <div class="nav-tab" data-ptab="profile">👤 Kabinet</div>
+      <div class="nav-tab" data-ptab="help">❓ Yordam</div>
+    </div>
+    <div id="platform-tab-content"></div>
+  `;
+
+  document.querySelectorAll(".nav-tab").forEach((tab) => {
+    tab.addEventListener("click", () => switchPlatformTab(tab.dataset.ptab));
+  });
+
+  await switchPlatformTab("home");
+}
+
+async function switchPlatformTab(tab) {
+  currentPlatformTab = tab;
+  document.querySelectorAll(".nav-tab").forEach((t) => t.classList.toggle("active", t.dataset.ptab === tab));
+  const content = document.getElementById("platform-tab-content");
+  content.innerHTML = `<div class="empty-state">⏳ Yuklanmoqda...</div>`;
+
+  if (tab === "home") renderHomeTab(content);
+  else if (tab === "create") await renderCreateBotTab(content);
+  else if (tab === "mybots") renderMyBotsTab(content);
+  else if (tab === "referral") renderReferralTab(content);
+  else if (tab === "profile") renderProfileTab(content);
+  else if (tab === "help") renderHelpTab(content);
+}
+
+function renderHomeTab(content) {
+  const activeBots = platformMe.bots.filter((b) => b.status === "active").length;
+  content.innerHTML = `
+    <div class="stat-grid">
+      ${statCard("💼", platformMe.balance.toLocaleString() + " so'm", "Balansingiz", COLORS.users)}
+      ${statCard("🤖", platformMe.bots.length, "Jami botlar", COLORS.messages)}
+      ${statCard("🟢", activeBots, "Faol botlar", "#22c55e")}
+      ${statCard("👥", platformMe.referral_count, "Takliflaringiz", COLORS.requests)}
+    </div>
+    <div class="panel">
+      <h3>🚀 Tez havolalar</h3>
+      <button class="action-btn" id="quick-create">➕ Yangi bot yaratish</button>
+      <button class="action-btn secondary" id="quick-mybots" style="margin-top:10px">🤖 Botlarimni ko'rish</button>
+    </div>
+  `;
+  document.getElementById("quick-create").addEventListener("click", () => switchPlatformTab("create"));
+  document.getElementById("quick-mybots").addEventListener("click", () => switchPlatformTab("mybots"));
+}
+
+async function renderCreateBotTab(content) {
+  if (!platformCatalog) {
+    platformCatalog = (await fetchJSON(`${API_BASE}/api/catalog`)).types;
+  }
+
+  if (!selectedBotType) {
+    content.innerHTML = `
+      <div class="panel">
+        <h3>➕ Bot turini tanlang</h3>
+        ${platformCatalog.map((t) => `
+          <div class="tariff-card" data-key="${t.key}">
+            <div>
+              <div class="tariff-title">${t.emoji} ${t.title}</div>
+              <div class="tariff-sub">${t.description.slice(0, 50)}...</div>
+            </div>
+            <div class="tariff-price">${t.price.toLocaleString()} so'm</div>
+          </div>
+        `).join("")}
+      </div>
+    `;
+    content.querySelectorAll(".tariff-card").forEach((card) => {
+      card.addEventListener("click", () => {
+        selectedBotType = platformCatalog.find((t) => t.key === card.dataset.key);
+        renderCreateBotTab(content);
+      });
+    });
+    return;
+  }
+
+  content.innerHTML = `
+    <div class="panel">
+      <h3>${selectedBotType.emoji} ${selectedBotType.title}</h3>
+      <p style="color:var(--hint); font-size:13.5px;">${selectedBotType.description}</p>
+      <div class="row-item"><span>Narxi</span><span class="tariff-price">${selectedBotType.price.toLocaleString()} so'm</span></div>
+      <div class="row-item"><span>Balansingiz</span><span>${platformMe.balance.toLocaleString()} so'm</span></div>
+    </div>
+    <div class="panel">
+      <div class="form-group">
+        <label>🔑 @BotFather'dan olingan token</label>
+        <input id="bot-token-input" placeholder="123456789:AA..." />
+      </div>
+      <button class="action-btn" id="submit-create">✅ Yaratish — ${selectedBotType.price.toLocaleString()} so'm</button>
+      <button class="action-btn secondary" id="back-to-catalog" style="margin-top:8px">◀ Orqaga</button>
+    </div>
+  `;
+
+  document.getElementById("back-to-catalog").addEventListener("click", () => {
+    selectedBotType = null;
+    renderCreateBotTab(content);
+  });
+
+  document.getElementById("submit-create").addEventListener("click", async () => {
+    const token = document.getElementById("bot-token-input").value.trim();
+    if (!token) return showToast("⚠️ Tokenni kiriting");
+    const btn = document.getElementById("submit-create");
+    btn.textContent = "⏳ Yaratilmoqda...";
+    try {
+      const result = await postJSON(`${API_BASE}/api/create-bot`, {
+        init_data: initData, bot_type: selectedBotType.key, token,
+      });
+      showToast(`✅ @${result.bot_username} yaratildi!`);
+      selectedBotType = null;
+      platformMe = await fetchJSON(`${API_BASE}/api/me?init_data=${encodeURIComponent(initData)}`);
+      await switchPlatformTab("mybots");
+    } catch (e) {
+      btn.textContent = `✅ Yaratish — ${selectedBotType.price.toLocaleString()} so'm`;
+      showToast("❌ Xatolik: token noto'g'ri yoki balans yetarli emas");
+    }
+  });
+}
+
+function renderMyBotsTab(content) {
+  if (platformMe.bots.length === 0) {
+    content.innerHTML = `<div class="panel"><div class="empty-state">Hali botlaringiz yo'q. "➕ Yaratish" bo'limidan birinchi botingizni yarating!</div></div>`;
+    return;
+  }
+
+  const typeEmoji = {
+    kino: "🎬", pul: "💰", openbudget: "📦", nakrutka: "🚀", vipkanal: "🔐",
+    aloqa: "📞", taxi: "🚕", anketa: "📝", kafe_pos: "🍽", konkurs: "🏆",
+  };
+
+  content.innerHTML = `
+    <div class="panel">
+      <h3>🤖 Botlaringiz</h3>
+      ${platformMe.bots.map((b) => `
+        <div class="tariff-card" data-bot-id="${b.id}">
+          <div>
+            <div class="tariff-title">${typeEmoji[b.type] || "🤖"} @${b.username}</div>
+            <div class="tariff-sub">${b.tariff} • ${b.status}</div>
+          </div>
+          <div>▶</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+
+  content.querySelectorAll(".tariff-card").forEach((card) => {
+    card.addEventListener("click", () => {
+      const id = card.dataset.botId;
+      window.location.href = `${window.location.pathname}?mode=admin&bot_id=${id}`;
+    });
+  });
+}
+
+function renderReferralTab(content) {
+  const link = platformMe.referral_link || "—";
+  content.innerHTML = `
+    <div class="panel">
+      <h3>🎁 Do'stlaringizni taklif qiling</h3>
+      <p style="color:var(--hint); font-size:13.5px;">Har bir taklif qilingan do'stingiz uchun 500 so'm bonus olasiz.</p>
+      <div class="stat-grid">
+        ${statCard("👥", platformMe.referral_count, "Takliflaringiz", COLORS.users)}
+        ${statCard("💰", (platformMe.referral_count * 500).toLocaleString(), "Ishlagan bonus (so'm)", COLORS.requests)}
+      </div>
+      <div class="form-group">
+        <label>Sizning havolangiz</label>
+        <input id="ref-link" value="${link}" readonly />
+      </div>
+      <button class="action-btn" id="copy-ref">📋 Havolani nusxalash</button>
+    </div>
+  `;
+  document.getElementById("copy-ref").addEventListener("click", () => {
+    navigator.clipboard?.writeText(link);
+    showToast("✅ Nusxalandi!");
+  });
+}
+
+function renderProfileTab(content) {
+  content.innerHTML = `
+    <div class="panel">
+      <h3>👤 Shaxsiy kabinet</h3>
+      <div class="row-item"><span>Telegram ID</span><span class="user-id">${platformMe.telegram_id}</span></div>
+      <div class="row-item"><span>Balans</span><span>${platformMe.balance.toLocaleString()} so'm</span></div>
+      <div class="row-item"><span>Botlar soni</span><span>${platformMe.bots.length} ta</span></div>
+      <div class="row-item"><span>Takliflar</span><span>${platformMe.referral_count} ta</span></div>
+    </div>
+    <div class="panel">
+      <h3>💳 Hisobni to'ldirish</h3>
+      <p style="color:var(--hint); font-size:13.5px;">Balansni to'ldirish uchun SafoBuilder botiga qayting va "💳 Hisob to'ldirish" tugmasini bosing — u yerda karta raqami va chek yuborish tartibi ko'rsatilgan.</p>
+    </div>
+  `;
+}
+
+function renderHelpTab(content) {
+  content.innerHTML = `
+    <div class="panel">
+      <h3>❓ Tez-tez so'raladigan savollar</h3>
+      <div class="row-item"><span>🤖 Bot qanday yaratiladi?</span></div>
+      <p style="color:var(--hint); font-size:13px; margin-top:-8px;">@BotFather orqali token oling, "➕ Yaratish" bo'limida turini tanlang va tokenni kiriting.</p>
+      <div class="row-item"><span>💳 To'lov qanday amalga oshiriladi?</span></div>
+      <p style="color:var(--hint); font-size:13px; margin-top:-8px;">Karta orqali to'lab, chek yuborasiz — admin tasdiqlagach mablag' tushadi.</p>
+      <div class="row-item"><span>⏳ Sinov muddati qancha?</span></div>
+      <p style="color:var(--hint); font-size:13px; margin-top:-8px;">Har bir yangi bot 3 kun bepul ishlaydi, keyin tarif tanlash kerak.</p>
+    </div>
+    <div class="panel">
+      <h3>📞 Yordam kerakmi?</h3>
+      <p style="color:var(--hint); font-size:13.5px;">SafoBuilder botiga qayting va "📩 Murojaat" bo'limidan admin bilan bog'laning.</p>
+    </div>
+  `;
 }
 
 async function fetchJSON(url) {
