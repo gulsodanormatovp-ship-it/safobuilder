@@ -10,11 +10,11 @@ from database.models import Referral, User
 router = Router(name="start")
 
 WELCOME_TEXT = (
-    "🛡 <b>SafoBuilder — Telegram botlar yaratish uchun qulay platforma</b>\n\n"
+    "🛡 <b>Vezto — Telegram botlar yaratish uchun qulay platforma</b>\n\n"
     "Bu platforma orqali siz hech qanday kod yozmasdan o'z Telegram "
     "botlaringizni tez va oson yaratishingiz, ularni tahrirlashingiz hamda "
     "boshqarishingiz mumkin.\n\n"
-    "⚡️ <b>Nega aynan SafoBuilder?</b>\n"
+    "⚡️ <b>Nega aynan Vezto?</b>\n"
     "• Botlar muntazam yangilanib boriladi\n"
     "• Barqaror va mukammal ishlaydigan tizim\n"
     "• To'liq o'zbek tilidagi qulay interfeys\n"
