@@ -23,7 +23,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -39,6 +39,38 @@ from database.models import Bot as BotModel, BotStat, User
 
 PLATFORM_BOT_TOKEN = os.getenv("PLATFORM_BOT_TOKEN", "")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
+
+# ------------------------------------------------------------------
+# Takroriy (duplicate) update'larning oldini olish.
+#
+# Render'ning bepul tarifida server "uxlab" qolgan bo'lsa, birinchi so'rov
+# uyg'onishni kutayotganda 10+ soniya cho'zilishi mumkin. Agar Telegram
+# 200 OK javobini kutib ulgurmasa, xuddi shu update'ni QAYTA yuboradi —
+# natijada bot bir xil xabarni bir necha marta jo'natgandek ko'rinadi.
+# Buning yechimi ikki qavatli:
+#   1) Telegramga DARHOL (hech narsani kutmasdan) 200 OK qaytaramiz va
+#      haqiqiy ishni orqa fonda (BackgroundTasks) bajaramiz.
+#   2) Har bir update_id'ni xotirada belgilab, ikkinchi marta kelsa
+#      butunlay e'tiborsiz qoldiramiz — hatto Telegram baribir qayta
+#      yuborsa ham, xabar ikki marta ketmaydi.
+# ------------------------------------------------------------------
+_seen_update_keys: set[str] = set()
+_seen_update_order: list[str] = []
+_MAX_TRACKED_UPDATES = 5000
+
+
+def _is_duplicate_update(scope: str, update_id: int | None) -> bool:
+    if update_id is None:
+        return False
+    key = f"{scope}:{update_id}"
+    if key in _seen_update_keys:
+        return True
+    _seen_update_keys.add(key)
+    _seen_update_order.append(key)
+    if len(_seen_update_order) > _MAX_TRACKED_UPDATES:
+        oldest = _seen_update_order.pop(0)
+        _seen_update_keys.discard(oldest)
+    return False
 
 app = FastAPI(title="SafoBuilder API")
 app.add_middleware(
@@ -73,13 +105,21 @@ async def on_startup() -> None:
 
 
 @app.post("/platform-webhook")
-async def platform_webhook(request: Request) -> dict:
+async def platform_webhook(request: Request, background_tasks: BackgroundTasks) -> dict:
     if platform_bot is None:
         raise HTTPException(status_code=500, detail="PLATFORM_BOT_TOKEN sozlanmagan")
+
     data = await request.json()
+    if _is_duplicate_update("platform", data.get("update_id")):
+        return {"ok": True, "note": "duplicate, skipped"}
+
+    background_tasks.add_task(_process_platform_update, data)
+    return {"ok": True}
+
+
+async def _process_platform_update(data: dict) -> None:
     update = Update.model_validate(data)
     await dp.feed_webhook_update(platform_bot, update)
-    return {"ok": True}
 
 
 # ------------------------------------------------------------------
@@ -87,15 +127,23 @@ async def platform_webhook(request: Request) -> dict:
 # ------------------------------------------------------------------
 
 @app.post("/webhook/{bot_id}")
-async def child_bot_webhook(bot_id: int, request: Request) -> dict:
+async def child_bot_webhook(bot_id: int, request: Request, background_tasks: BackgroundTasks) -> dict:
     update = await request.json()
 
+    if _is_duplicate_update(f"bot{bot_id}", update.get("update_id")):
+        return {"ok": True, "note": "duplicate, skipped"}
+
+    background_tasks.add_task(_process_child_bot_update, bot_id, update)
+    return {"ok": True}
+
+
+async def _process_child_bot_update(bot_id: int, update: dict) -> None:
     async with get_session() as session:
         result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
         bot_row = result.scalar_one_or_none()
 
     if bot_row is None:
-        raise HTTPException(status_code=404, detail="Bot topilmadi")
+        return
 
     if bot_row.expires_at and bot_row.expires_at < datetime.utcnow():
         chat_id = (
@@ -113,26 +161,25 @@ async def child_bot_webhook(bot_id: int, request: Request) -> dict:
                                 "yangilashi kerak.",
                     },
                 )
-        return {"ok": True, "note": "obuna tugagan"}
+        return
 
     handler_cls = BOT_TYPE_REGISTRY.get(bot_row.bot_type)
     if handler_cls is None:
-        return {"ok": True, "note": f"{bot_row.bot_type} turi hali qo'llab-quvvatlanmaydi"}
+        return
 
     child_bot = handler_cls(bot_row)
     async with get_session() as session:
         allowed = await child_bot.process_common_update(update, session)
     if not allowed:
-        return {"ok": True, "note": "bloklangan yoki spam-limit"}
+        return
 
     async with get_session() as session:
         handled = await child_bot.handle_owner_commands(update, session)
     if handled:
-        return {"ok": True, "note": "owner buyrug'i bajarildi"}
+        return
 
     await child_bot.handle_update(update)
     await _record_activity(bot_id, update)
-    return {"ok": True}
 
 
 async def _record_activity(bot_id: int, update: dict) -> None:
