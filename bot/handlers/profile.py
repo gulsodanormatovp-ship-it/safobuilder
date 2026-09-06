@@ -67,7 +67,7 @@ async def open_website(message: Message) -> None:
 
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🚀 Tez kirish (Telegram ichida)",
-                               web_app={"url": f"{WEBAPP_BASE_URL}?mode=admin"})],
+                               web_app={"url": f"{WEBAPP_BASE_URL}?mode=dashboard"})],
         [InlineKeyboardButton(text="🌐 Brauzerda ochish", url=WEBAPP_BASE_URL)],
     ])
     await message.answer(
