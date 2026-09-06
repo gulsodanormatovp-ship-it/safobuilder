@@ -13,12 +13,47 @@ class KinoBot(ChildBot):
     """
     Owner (bot egasi) botga video yuboradi -> bot random kod beradi.
     Har qanday foydalanuvchi shu kodni yuborsa -> video qaytariladi.
-    Kodlar `settings["movies"] = {"123456": {"chat_id": .., "message_id": ..}}`
-    ko'rinishida saqlanadi.
+    /start endi 3+ tugmali menyu bilan ochiladi.
     """
+
+    def _main_menu(self, is_owner: bool) -> dict:
+        rows = [
+            [{"text": "🔎 Kino qidirish", "callback_data": "kino:search"}],
+            [{"text": "🆕 Yangi kinolar", "callback_data": "kino:latest"}],
+            [{"text": "ℹ️ Yordam", "callback_data": "kino:help"}],
+        ]
+        if is_owner:
+            rows.append([{"text": "📊 Statistikam", "callback_data": "kino:stats"}])
+        return {"inline_keyboard": rows}
 
     async def handle_update(self, update: dict) -> None:
         message = update.get("message")
+        callback = update.get("callback_query")
+
+        if callback:
+            chat_id = callback["from"]["id"]
+            data = callback["data"]
+            is_owner = chat_id == self.settings.get("owner_telegram_id")
+
+            if data == "kino:search":
+                await self.answer_callback(callback["id"])
+                await self.send_message(chat_id, "🔎 Kino kodini yuboring (masalan: 482913)")
+            elif data == "kino:latest":
+                movies = self.settings.get("movies", {})
+                last_codes = list(movies.keys())[-5:]
+                text = ("🆕 Oxirgi qo'shilgan kodlar:\n\n" + "\n".join(f"🔑 {c}" for c in last_codes)) \
+                    if last_codes else "Hozircha kino yo'q."
+                await self.answer_callback(callback["id"])
+                await self.send_message(chat_id, text)
+            elif data == "kino:help":
+                await self.answer_callback(callback["id"])
+                await self.send_message(chat_id, "ℹ️ Kino kodini yuboring — bot filmni avtomatik topib beradi.")
+            elif data == "kino:stats" and is_owner:
+                movies = self.settings.get("movies", {})
+                await self.answer_callback(callback["id"])
+                await self.send_message(chat_id, f"📊 Jami yuklangan kinolar: {len(movies)} ta")
+            return
+
         if not message:
             return
 
@@ -31,27 +66,24 @@ class KinoBot(ChildBot):
 
         text = (message.get("text") or "").strip()
         if text == "/start":
-            await self.send_message(
-                chat_id,
-                "🎬 Xush kelibsiz! Kino kodini yuboring va filmni oling.\n\n"
-                + ("(Siz botning egasisiz — video yuborsangiz avtomatik kod olasiz)"
-                   if is_owner else ""),
+            await self.call_api(
+                "sendMessage", chat_id=chat_id,
+                text="🎬 <b>Xush kelibsiz!</b>\n\nKino kodini yuboring yoki quyidagi tugmalardan foydalaning:",
+                parse_mode="HTML",
+                reply_markup=self._main_menu(is_owner),
             )
             return
 
         if text.isdigit() and text in self.settings.get("movies", {}):
             movie = self.settings["movies"][text]
             await self.call_api(
-                "copyMessage",
-                chat_id=chat_id,
-                from_chat_id=movie["chat_id"],
-                message_id=movie["message_id"],
+                "copyMessage", chat_id=chat_id,
+                from_chat_id=movie["chat_id"], message_id=movie["message_id"],
             )
             return
 
         if text.isdigit():
             await self.send_message(chat_id, "❌ Bunday kodli kino topilmadi.")
-            return
 
     async def _save_movie(self, message: dict, owner_chat_id: int) -> None:
         code = _generate_code()
@@ -65,6 +97,5 @@ class KinoBot(ChildBot):
 
         await self.send_message(
             owner_chat_id,
-            f"✅ Film saqlandi!\n🔑 Kod: <code>{code}</code>\n\n"
-            f"Foydalanuvchilar shu kodni botga yuborib filmni olishlari mumkin.",
+            f"✅ Film saqlandi!\n🔑 Kod: <code>{code}</code>",
         )
