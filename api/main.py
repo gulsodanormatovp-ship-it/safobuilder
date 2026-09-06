@@ -28,14 +28,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 
+from bot.bot_catalog import BOT_CATALOG
 from bot.child_bots import BOT_TYPE_REGISTRY
 from bot.handlers import bot_settings, create_bot, my_bots, payment, profile, start
 from bot.middlewares import EnsureUserMiddleware
 from bot.tariffs import TARIFFS
 from database.db import get_session, init_db
-from database.models import Bot as BotModel, BotStat, User
+from database.models import Bot as BotModel, BotStat, Referral, User
 
 PLATFORM_BOT_TOKEN = os.getenv("PLATFORM_BOT_TOKEN", "")
 PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
@@ -102,6 +103,9 @@ async def on_startup() -> None:
     await init_db()
     if platform_bot and PUBLIC_BASE_URL:
         await platform_bot.set_webhook(f"{PUBLIC_BASE_URL}/platform-webhook")
+    if platform_bot:
+        me = await platform_bot.get_me()
+        platform_bot_username_cache["username"] = me.username
 
 
 @app.post("/platform-webhook")
@@ -287,14 +291,100 @@ async def get_me(init_data: str) -> dict:
         bots_result = await session.execute(select(BotModel).where(BotModel.owner_id == user.id))
         bots = bots_result.scalars().all()
 
+        ref_count_result = await session.execute(
+            select(func.count()).select_from(Referral).where(Referral.referrer_id == user.id)
+        )
+        referral_count = ref_count_result.scalar_one()
+
+    bot_username = platform_bot_username_cache.get("username", "")
     return {
         "telegram_id": user.telegram_id,
         "balance": user.balance,
+        "referral_count": referral_count,
+        "referral_link": f"https://t.me/{bot_username}?start={user.telegram_id}" if bot_username else None,
         "bots": [
-            {"id": b.id, "username": b.bot_username, "type": b.bot_type, "status": b.status}
+            {"id": b.id, "username": b.bot_username, "type": b.bot_type,
+             "status": b.status, "tariff": b.tariff,
+             "expires_at": b.expires_at.isoformat() if b.expires_at else None}
             for b in bots
         ],
     }
+
+
+platform_bot_username_cache: dict[str, str] = {}
+
+
+@app.get("/api/catalog")
+async def get_bot_catalog() -> dict:
+    return {
+        "types": [
+            {
+                "key": info.key, "title": info.title, "emoji": info.emoji,
+                "description": info.description, "price": info.price,
+            }
+            for info in BOT_CATALOG.values()
+        ]
+    }
+
+
+class CreateBotRequest(BaseModel):
+    init_data: str
+    bot_type: str
+    token: str
+
+
+@app.post("/api/create-bot")
+async def create_bot_via_miniapp(payload: CreateBotRequest) -> dict:
+    info = BOT_CATALOG.get(payload.bot_type)
+    if info is None:
+        raise HTTPException(status_code=400, detail="Noto'g'ri bot turi")
+
+    tg_user = verify_telegram_webapp_data(payload.init_data)
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"https://api.telegram.org/bot{payload.token}/getMe")
+        tg_check = resp.json()
+
+    if not tg_check.get("ok"):
+        raise HTTPException(status_code=400, detail="Token noto'g'ri yoki botga ulanib bo'lmadi")
+
+    bot_username = tg_check["result"]["username"]
+    bot_display_name = tg_check["result"]["first_name"]
+
+    async with get_session() as session:
+        user_result = await session.execute(select(User).where(User.telegram_id == tg_user["id"]))
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
+
+        if user.balance < info.price:
+            raise HTTPException(status_code=402, detail="Balans yetarli emas")
+
+        user.balance -= info.price
+        new_bot = BotModel(
+            owner_id=user.id,
+            bot_type=info.key,
+            status="active",
+            bot_token=payload.token,
+            bot_username=bot_username,
+            display_name=bot_display_name,
+            tariff="trial",
+            expires_at=datetime.utcnow() + timedelta(days=3),
+            settings_json=json.dumps({"owner_telegram_id": tg_user["id"]}),
+        )
+        session.add(new_bot)
+        await session.flush()
+        bot_id = new_bot.id
+        await session.commit()
+
+    webhook_url = f"{PUBLIC_BASE_URL}/webhook/{bot_id}"
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.get(
+            f"https://api.telegram.org/bot{payload.token}/setWebhook",
+            params={"url": webhook_url},
+        )
+
+    return {"ok": True, "bot_id": bot_id, "bot_username": bot_username}
 
 
 @app.get("/api/bots/{bot_id}/anketa-export")
