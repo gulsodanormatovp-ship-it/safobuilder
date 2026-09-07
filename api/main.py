@@ -512,7 +512,9 @@ async def unblock_user_via_miniapp(bot_id: int, payload: UserActionRequest) -> d
 EDITABLE_SETTINGS_KEYS = (
     "questions", "driver_group_id", "price", "channel_id",
     "prize_text", "bonus_per_invite", "services", "candidates",
-    "kitchen_group_id",
+    "kitchen_group_id", "required_channel", "ad_text",
+    "subscription_price", "subscription_days", "trial_days",
+    "payment_card_number", "post_channel",
 )
 
 
@@ -596,6 +598,39 @@ async def renew_subscription(bot_id: int, payload: RenewRequest) -> dict:
         new_expiry = bot_row.expires_at.isoformat()
 
     return {"ok": True, "new_expiry": new_expiry}
+
+
+@app.get("/api/bots/{bot_id}/kino/movies")
+async def list_kino_movies(bot_id: int, init_data: str) -> dict:
+    bot_row = await _get_owned_bot(bot_id, init_data)
+    settings = json.loads(bot_row.settings_json or "{}")
+    movies = settings.get("movies", {})
+    return {
+        "movies": [
+            {"code": code, "added_at": data.get("added_at")}
+            for code, data in sorted(movies.items(), key=lambda x: x[1].get("added_at", ""), reverse=True)
+        ]
+    }
+
+
+class DeleteMovieRequest(BaseModel):
+    init_data: str
+    code: str
+
+
+@app.post("/api/bots/{bot_id}/kino/delete-movie")
+async def delete_kino_movie(bot_id: int, payload: DeleteMovieRequest) -> dict:
+    await _get_owned_bot(bot_id, payload.init_data)
+    async with get_session() as session:
+        result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
+        fresh_row = result.scalar_one()
+        settings = json.loads(fresh_row.settings_json or "{}")
+        movies = settings.get("movies", {})
+        movies.pop(payload.code, None)
+        settings["movies"] = movies
+        fresh_row.settings_json = json.dumps(settings)
+        await session.commit()
+    return {"ok": True}
 
 
 @app.get("/")
