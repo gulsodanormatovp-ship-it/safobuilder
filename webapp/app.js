@@ -230,6 +230,11 @@ async function renderSettingsTab(content) {
   const settings = data.settings;
   const type = botInfo.type;
 
+  const universalFields = [
+    { key: "required_channel", label: "Majburiy obuna kanali (masalan @vezto_channel)", type: "text" },
+    { key: "ad_text", label: "Reklama matni (muhim amaldan keyin ko'rsatiladi)", type: "text" },
+  ];
+
   const fieldsByType = {
     anketa: [{ key: "questions", label: "Savollar (har biri yangi qatorda)", type: "textarea", isList: true }],
     taxi: [{ key: "driver_group_id", label: "Haydovchilar guruhi ID", type: "text" }],
@@ -241,14 +246,16 @@ async function renderSettingsTab(content) {
     konkurs: [{ key: "prize_text", label: "Sovrinlar matni", type: "text" }],
     pul: [{ key: "bonus_per_invite", label: "Har bir taklif uchun bonus (so'm)", type: "text" }],
     kafe_pos: [{ key: "kitchen_group_id", label: "Oshxona guruhi ID", type: "text" }],
+    kino: [
+      { key: "subscription_price", label: "Obuna narxi (so'm)", type: "text" },
+      { key: "subscription_days", label: "Obuna muddati (kun)", type: "text" },
+      { key: "trial_days", label: "Bepul sinov (kun)", type: "text" },
+      { key: "payment_card_number", label: "To'lov uchun karta raqami", type: "text" },
+      { key: "post_channel", label: "Avtopost kanali (masalan @mychannel)", type: "text" },
+    ],
   };
 
-  const fields = fieldsByType[type];
-
-  if (!fields) {
-    content.innerHTML = `<div class="panel"><div class="empty-state">Bu bot turi uchun Mini App orqali sozlanadigan parametr yo'q.</div></div>`;
-    return;
-  }
+  const fields = [...universalFields, ...(fieldsByType[type] || [])];
 
   content.innerHTML = `
     <div class="panel">
@@ -263,6 +270,14 @@ async function renderSettingsTab(content) {
       `).join("")}
       <button class="action-btn" id="save-settings">💾 Saqlash</button>
     </div>
+    <div class="panel">
+      <h3>👮 Boshqaruv buyruqlari</h3>
+      <p style="color:var(--hint); font-size:13px;">Bularni to'g'ridan-to'g'ri botga yozing:</p>
+      <div class="row-item"><span>/addadmin &lt;id&gt;</span><span style="color:var(--hint)">admin qo'shish</span></div>
+      <div class="row-item"><span>/balance+ &lt;id&gt; &lt;summa&gt;</span><span style="color:var(--hint)">balans qo'shish</span></div>
+      <div class="row-item"><span>/balance- &lt;id&gt; &lt;summa&gt;</span><span style="color:var(--hint)">balans ayirish</span></div>
+      <div class="row-item"><span>/adminlar</span><span style="color:var(--hint)">ro'yxat</span></div>
+    </div>
   `;
 
   document.getElementById("save-settings").addEventListener("click", async () => {
@@ -275,6 +290,35 @@ async function renderSettingsTab(content) {
     });
     await postJSON(`${API_BASE}/api/bots/${botId}/settings`, { init_data: initData, settings: payload });
     showToast("✅ Sozlamalar saqlandi");
+  });
+
+  if (type === "kino") {
+    await renderKinoLibrary(content);
+  }
+}
+
+async function renderKinoLibrary(content) {
+  const data = await fetchJSON(`${API_BASE}/api/bots/${botId}/kino/movies?init_data=${encodeURIComponent(initData)}`);
+  const libraryPanel = document.createElement("div");
+  libraryPanel.className = "panel";
+  libraryPanel.innerHTML = `
+    <h3>🎬 Kino kutubxonasi (${data.movies.length})</h3>
+    ${data.movies.length === 0
+      ? `<div class="empty-state">Hali kino qo'shilmagan.</div>`
+      : data.movies.map((m) => `
+        <div class="row-item">
+          <span class="user-id">🔑 ${m.code}</span>
+          <button class="pill-btn block" data-code="${m.code}">🗑 O'chirish</button>
+        </div>`).join("")}
+  `;
+  content.appendChild(libraryPanel);
+
+  libraryPanel.querySelectorAll(".pill-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      await postJSON(`${API_BASE}/api/bots/${botId}/kino/delete-movie`, { init_data: initData, code: btn.dataset.code });
+      showToast("🗑 O'chirildi");
+      await renderSettingsTab(content);
+    });
   });
 }
 
