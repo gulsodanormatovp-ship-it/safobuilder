@@ -69,4 +69,11 @@ BOT_CATALOG: dict[str, BotTypeInfo] = {
         description="Referal asosidagi konkurs boti. Siz sovrinlarni belgilaysiz, ishtirokchilar taklif havolasi orqali qatnashadi.",
         demo_username="DemoKonkursBot",
     ),
+    "viktorina": BotTypeInfo(
+        key="viktorina", title="Viktorina Bot", emoji="🎉", price=9_000,
+        description=(
+            "Bolalar va kattalar uchun qiziqarli savol-javob o'yini. "
+            "Foydalanuvchilar ball to'playdi va reytingda raqobatlashadi."
+        ),
+    ),
 }
