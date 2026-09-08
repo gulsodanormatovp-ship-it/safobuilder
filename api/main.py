@@ -514,7 +514,7 @@ EDITABLE_SETTINGS_KEYS = (
     "prize_text", "bonus_per_invite", "services", "candidates",
     "kitchen_group_id", "required_channel", "ad_text",
     "subscription_price", "subscription_days", "trial_days",
-    "payment_card_number", "post_channel",
+    "payment_card_number", "post_channel", "quiz_questions",
 )
 
 
