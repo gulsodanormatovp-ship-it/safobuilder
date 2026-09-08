@@ -13,6 +13,7 @@ from .openbudget_bot import OpenBudgetBot
 from .pul_bot import PulBot
 from .taxi_bot import TaxiBot
 from .vipkanal_bot import VipKanalBot
+from .viktorina_bot import ViktorinaBot
 
 BOT_TYPE_REGISTRY: dict[str, type[ChildBot]] = {
     "kino": KinoBot,
@@ -25,4 +26,5 @@ BOT_TYPE_REGISTRY: dict[str, type[ChildBot]] = {
     "kafe_pos": KafePosBot,
     "nakrutka": NakrutkaBot,
     "konkurs": KonkursBot,
+    "viktorina": ViktorinaBot,
 }
