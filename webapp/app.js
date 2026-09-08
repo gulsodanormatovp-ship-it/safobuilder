@@ -31,6 +31,7 @@ async function renderShell() {
   const typeEmoji = {
     kino: "🎬", pul: "💰", openbudget: "📦", nakrutka: "🚀", vipkanal: "🔐",
     aloqa: "📞", taxi: "🚕", anketa: "📝", kafe_pos: "🍽", konkurs: "🏆",
+    viktorina: "🎉",
   }[botInfo.type] || "🤖";
 
   app.innerHTML = `
@@ -252,6 +253,9 @@ async function renderSettingsTab(content) {
       { key: "trial_days", label: "Bepul sinov (kun)", type: "text" },
       { key: "payment_card_number", label: "To'lov uchun karta raqami", type: "text" },
       { key: "post_channel", label: "Avtopost kanali (masalan @mychannel)", type: "text" },
+    ],
+    viktorina: [
+      { key: "quiz_questions", label: "Savollar (format: Savol|Variant1|Variant2|Variant3|To'g'ri raqami)", type: "textarea", isList: true },
     ],
   };
 
@@ -565,6 +569,7 @@ function renderMyBotsTab(content) {
   const typeEmoji = {
     kino: "🎬", pul: "💰", openbudget: "📦", nakrutka: "🚀", vipkanal: "🔐",
     aloqa: "📞", taxi: "🚕", anketa: "📝", kafe_pos: "🍽", konkurs: "🏆",
+    viktorina: "🎉",
   };
 
   content.innerHTML = `
