@@ -32,6 +32,7 @@ BOT_TYPE_LABELS = {
     "kafe_pos": "🍽 Kafe POS Bot",
     "konkurs": "🏆 Konkurs Bot",
     "viktorina": "🎉 Viktorina Bot",
+    "dokon": "🛒 Do'kon Bot",
 }
 
 
