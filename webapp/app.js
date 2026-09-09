@@ -31,8 +31,10 @@ async function renderShell() {
   const typeEmoji = {
     kino: "🎬", pul: "💰", openbudget: "📦", nakrutka: "🚀", vipkanal: "🔐",
     aloqa: "📞", taxi: "🚕", anketa: "📝", kafe_pos: "🍽", konkurs: "🏆",
-    viktorina: "🎉",
+    viktorina: "🎉", dokon: "🛒",
   }[botInfo.type] || "🤖";
+
+  document.documentElement.style.setProperty("--accent", botInfo.theme_color || "#6366f1");
 
   app.innerHTML = `
     <div class="header">
@@ -47,12 +49,13 @@ async function renderShell() {
       </div>
     </div>
 
-    <div class="nav-tabs">
+    <div class="nav-tabs" style="flex-wrap:wrap;">
       <div class="nav-tab active" data-tab="overview">📊 Umumiy</div>
       <div class="nav-tab" data-tab="users">👥 Userlar</div>
       <div class="nav-tab" data-tab="broadcast">📢 Xabar</div>
       <div class="nav-tab" data-tab="settings">⚙️ Sozlash</div>
       <div class="nav-tab" data-tab="subscription">💎 Obuna</div>
+      <div class="nav-tab" data-tab="appearance">🎨 Ko'rinish</div>
     </div>
 
     <div id="tab-content"></div>
@@ -76,6 +79,7 @@ async function switchTab(tab) {
   else if (tab === "broadcast") await renderBroadcastTab(content);
   else if (tab === "settings") await renderSettingsTab(content);
   else if (tab === "subscription") await renderSubscriptionTab(content);
+  else if (tab === "appearance") await renderAppearanceTab(content);
 }
 
 async function renderOverviewTab(content) {
@@ -257,6 +261,9 @@ async function renderSettingsTab(content) {
     viktorina: [
       { key: "quiz_questions", label: "Savollar (format: Savol|Variant1|Variant2|Variant3|To'g'ri raqami)", type: "textarea", isList: true },
     ],
+    dokon: [
+      { key: "products", label: "Mahsulotlar (format: Nomi|Narxi|Tavsif)", type: "textarea", isList: true },
+    ],
   };
 
   const fields = [...universalFields, ...(fieldsByType[type] || [])];
@@ -372,6 +379,57 @@ async function renderSubscriptionTab(content) {
       } catch (e) {
         showToast("⚠️ Balans yetarli emas yoki xatolik yuz berdi");
       }
+    });
+  });
+}
+
+// ---------------- TAB: Ko'rinish (rang temasi + QR-kod) ----------------
+
+const THEME_PRESETS = [
+  { name: "Indigo", color: "#6366f1" },
+  { name: "Ko'k", color: "#3b82f6" },
+  { name: "Yashil", color: "#22c55e" },
+  { name: "Qizil", color: "#ef4444" },
+  { name: "Pushti", color: "#ec4899" },
+  { name: "Sariq", color: "#f59e0b" },
+];
+
+async function renderAppearanceTab(content) {
+  const botLink = `https://t.me/${botInfo.username}`;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=280x280&data=${encodeURIComponent(botLink)}`;
+
+  content.innerHTML = `
+    <div class="panel">
+      <h3>🎨 Rang temasi</h3>
+      <p style="color:var(--hint); font-size:13px;">Mini App ko'rinishi shu rangda bo'ladi.</p>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:10px;">
+        ${THEME_PRESETS.map((t) => `
+          <div class="theme-dot" data-color="${t.color}" title="${t.name}"
+               style="width:44px; height:44px; border-radius:50%; background:${t.color}; cursor:pointer; border:3px solid ${t.color === botInfo.theme_color ? "white" : "transparent"};">
+          </div>
+        `).join("")}
+      </div>
+    </div>
+    <div class="panel">
+      <h3>📱 QR-kod</h3>
+      <p style="color:var(--hint); font-size:13px;">Botingizni oflayn (varaqa, do'kon) reklama qilish uchun.</p>
+      <div style="text-align:center; margin-top:12px;">
+        <img src="${qrUrl}" style="border-radius:12px; background:white; padding:10px;" width="200" height="200" />
+      </div>
+      <a href="${qrUrl}" download="qr-${botInfo.username}.png" class="action-btn secondary" style="display:block; text-align:center; text-decoration:none; margin-top:12px;">⬇️ Yuklab olish</a>
+    </div>
+  `;
+
+  content.querySelectorAll(".theme-dot").forEach((dot) => {
+    dot.addEventListener("click", async () => {
+      const color = dot.dataset.color;
+      await postJSON(`${API_BASE}/api/bots/${botId}/settings`, {
+        init_data: initData, settings: { theme_color: color },
+      });
+      botInfo.theme_color = color;
+      document.documentElement.style.setProperty("--accent", color);
+      showToast("✅ Rang o'zgartirildi!");
+      await renderAppearanceTab(content);
     });
   });
 }
@@ -569,7 +627,7 @@ function renderMyBotsTab(content) {
   const typeEmoji = {
     kino: "🎬", pul: "💰", openbudget: "📦", nakrutka: "🚀", vipkanal: "🔐",
     aloqa: "📞", taxi: "🚕", anketa: "📝", kafe_pos: "🍽", konkurs: "🏆",
-    viktorina: "🎉",
+    viktorina: "🎉", dokon: "🛒",
   };
 
   content.innerHTML = `
