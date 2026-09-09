@@ -87,6 +87,34 @@ class ChildBot(ABC):
     def get_balance(self, chat_id: int) -> int:
         return self.settings.get("user_balances", {}).get(str(chat_id), 0)
 
+    # ------------------------------------------------------------
+    # Ball / daraja tizimi (barcha botlarda avtomatik ishlaydi)
+    # ------------------------------------------------------------
+
+    LEVELS = [
+        (0, "🆕 Yangi"),
+        (50, "🥉 Bronza"),
+        (200, "🥈 Kumush"),
+        (500, "🥇 Oltin"),
+        (1000, "💎 Olmos"),
+    ]
+
+    def add_points(self, chat_id: int, amount: int = 1) -> None:
+        points = self.settings.setdefault("user_points", {})
+        key = str(chat_id)
+        points[key] = points.get(key, 0) + amount
+
+    def get_points(self, chat_id: int) -> int:
+        return self.settings.get("user_points", {}).get(str(chat_id), 0)
+
+    def get_level(self, chat_id: int) -> str:
+        points = self.get_points(chat_id)
+        level_name = self.LEVELS[0][1]
+        for threshold, name in self.LEVELS:
+            if points >= threshold:
+                level_name = name
+        return level_name
+
     def check_rate_limit(self, chat_id: int, max_per_10s: int = 5) -> bool:
         now = time.time()
         history = self.settings.setdefault("rate_limit", {})
@@ -148,9 +176,46 @@ class ChildBot(ABC):
             return False
 
         self.track_user(chat_id)
+        if message:
+            self.add_points(chat_id, 1)
         await self.save_settings(session)
         await session.commit()
         return True
+
+    async def handle_universal_user_commands(self, update: dict, session) -> bool:
+        """
+        HAR BIR foydalanuvchi (owner bo'lmasa ham) ishlata oladigan buyruqlar:
+        /ballim, /reyting. True — shu yerda bajarildi, botga xos handle_update
+        chaqirilmaydi.
+        """
+        message = update.get("message")
+        if not message:
+            return False
+
+        chat_id = message["chat"]["id"]
+        text = (message.get("text") or "").strip()
+
+        if text == "/ballim":
+            points = self.get_points(chat_id)
+            level = self.get_level(chat_id)
+            await self.send_message(chat_id, f"⭐ Ballaringiz: {points}\n🏅 Darajangiz: {level}")
+            return True
+
+        if text == "/reyting":
+            points_map = self.settings.get("user_points", {})
+            top = sorted(points_map.items(), key=lambda x: x[1], reverse=True)[:10]
+            if not top:
+                await self.send_message(chat_id, "🏆 Hali reyting bo'sh.")
+                return True
+            medals = ["🥇", "🥈", "🥉"]
+            lines = [
+                f"{medals[i] if i < 3 else f'{i + 1}.'} {uid} — {pts} ball"
+                for i, (uid, pts) in enumerate(top)
+            ]
+            await self.send_message(chat_id, "🏆 <b>TOP-10 reyting</b>\n\n" + "\n".join(lines))
+            return True
+
+        return False
 
     async def handle_owner_commands(self, update: dict, session) -> bool:
         message = update.get("message")
