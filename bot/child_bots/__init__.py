@@ -1,10 +1,11 @@
 """
-Bot turi -> mantiq klassi ro'yxati. Barcha 10 turdagi bot shu yerda ro'yxatdan
+Bot turi -> mantiq klassi ro'yxati. Barcha turdagi bot shu yerda ro'yxatdan
 o'tgan — yangi tur qo'shish uchun shunchaki bitta qator qo'shish kifoya.
 """
 from .aloqa_bot import AloqaBot
 from .anketa_bot import AnketaBot
 from .base import ChildBot
+from .dokon_bot import DokonBot
 from .kafe_pos_bot import KafePosBot
 from .kino_bot import KinoBot
 from .konkurs_bot import KonkursBot
@@ -27,4 +28,5 @@ BOT_TYPE_REGISTRY: dict[str, type[ChildBot]] = {
     "nakrutka": NakrutkaBot,
     "konkurs": KonkursBot,
     "viktorina": ViktorinaBot,
+    "dokon": DokonBot,
 }
