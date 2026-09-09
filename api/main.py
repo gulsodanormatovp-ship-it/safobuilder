@@ -182,6 +182,11 @@ async def _process_child_bot_update(bot_id: int, update: dict) -> None:
     if handled:
         return
 
+    async with get_session() as session:
+        handled = await child_bot.handle_universal_user_commands(update, session)
+    if handled:
+        return
+
     await child_bot.handle_update(update)
     await _record_activity(bot_id, update)
 
@@ -244,6 +249,7 @@ async def get_bot_public_info(bot_id: int) -> dict:
         "username": bot_row.bot_username,
         "tariff": bot_row.tariff,
         "status": bot_row.status,
+        "theme_color": settings.get("theme_color", "#6366f1"),
         "questions": settings.get("questions", []) if bot_row.bot_type == "anketa" else None,
     }
 
@@ -515,6 +521,7 @@ EDITABLE_SETTINGS_KEYS = (
     "kitchen_group_id", "required_channel", "ad_text",
     "subscription_price", "subscription_days", "trial_days",
     "payment_card_number", "post_channel", "quiz_questions",
+    "theme_color", "products",
 )
 
 
