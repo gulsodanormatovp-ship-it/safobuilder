@@ -76,4 +76,11 @@ BOT_CATALOG: dict[str, BotTypeInfo] = {
             "Foydalanuvchilar ball to'playdi va reytingda raqobatlashadi."
         ),
     ),
+    "dokon": BotTypeInfo(
+        key="dokon", title="Do'kon Bot", emoji="🛒", price=25_000,
+        description=(
+            "To'liq onlayn do'kon: katalog, savat, buyurtma va yetkazib "
+            "berish holatini kuzatish."
+        ),
+    ),
 }
