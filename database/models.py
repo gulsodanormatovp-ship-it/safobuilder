@@ -33,6 +33,8 @@ class BotType(str, enum.Enum):
     ANKETA = "anketa"
     KAFE_POS = "kafe_pos"
     KONKURS = "konkurs"
+    VIKTORINA = "viktorina"
+    DOKON = "dokon"
 
 
 class BotStatus(str, enum.Enum):
