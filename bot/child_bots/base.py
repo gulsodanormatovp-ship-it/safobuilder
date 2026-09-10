@@ -261,7 +261,7 @@ class ChildBot(ABC):
 
             if text.startswith("/balance+"):
                 parts = text.split()
-                if len(parts) == 3 and parts[1].isdigit() and parts[2].lstrip("-").isdigit():
+                if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit() and int(parts[2]) <= 50_000_000:
                     balances = self.settings.setdefault("user_balances", {})
                     key = parts[1]
                     balances[key] = balances.get(key, 0) + int(parts[2])
@@ -269,12 +269,12 @@ class ChildBot(ABC):
                     await session.commit()
                     await self.send_message(chat_id, f"✅ {parts[1]} balansiga {parts[2]} qo'shildi. Yangi balans: {balances[key]:,}".replace(",", " "))
                 else:
-                    await self.send_message(chat_id, "ℹ️ Foydalanish: /balance+ <user_id> <summa>")
+                    await self.send_message(chat_id, "ℹ️ Foydalanish: /balance+ <user_id> <summa> (max 50 000 000)")
                 return True
 
             if text.startswith("/balance-"):
                 parts = text.split()
-                if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit():
+                if len(parts) == 3 and parts[1].isdigit() and parts[2].isdigit() and int(parts[2]) <= 50_000_000:
                     balances = self.settings.setdefault("user_balances", {})
                     key = parts[1]
                     balances[key] = balances.get(key, 0) - int(parts[2])
@@ -282,7 +282,7 @@ class ChildBot(ABC):
                     await session.commit()
                     await self.send_message(chat_id, f"✅ {parts[1]} balansidan {parts[2]} ayirildi. Yangi balans: {balances[key]:,}".replace(",", " "))
                 else:
-                    await self.send_message(chat_id, "ℹ️ Foydalanish: /balance- <user_id> <summa>")
+                    await self.send_message(chat_id, "ℹ️ Foydalanish: /balance- <user_id> <summa> (max 50 000 000)")
                 return True
 
             if text.startswith("/majburiyoff"):
