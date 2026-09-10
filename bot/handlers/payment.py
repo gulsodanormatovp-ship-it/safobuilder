@@ -33,8 +33,8 @@ async def topup_entry(message: Message, state: FSMContext) -> None:
 @router.message(TopUpStates.waiting_amount)
 async def topup_amount(message: Message, state: FSMContext) -> None:
     text = (message.text or "").replace(" ", "")
-    if not text.isdigit() or int(text) < 1000:
-        await message.answer("❌ Kamida 1 000 so'm miqdorida son kiriting.")
+    if not text.isdigit() or not (1000 <= int(text) <= 50_000_000):
+        await message.answer("❌ 1 000 dan 50 000 000 so'mgacha son kiriting.")
         return
     await state.update_data(amount=int(text))
     await message.answer(
