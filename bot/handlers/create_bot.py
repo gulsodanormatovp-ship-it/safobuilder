@@ -10,8 +10,8 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 from sqlalchemy import select
 
-from bot.bot_catalog import BOT_CATALOG
 from bot.keyboards import MAIN_MENU, bot_type_confirm, bot_type_menu
+from bot.platform_settings import get_effective_catalog
 from database.db import get_session
 from database.models import Bot, BotStatus, User
 
@@ -29,16 +29,20 @@ class CreateBotStates(StatesGroup):
 @router.message(F.text == "➕ Bot yaratish")
 async def start_creation(message: Message, state: FSMContext) -> None:
     await state.set_state(CreateBotStates.choosing_type)
+    async with get_session() as session:
+        catalog = await get_effective_catalog(session)
     await message.answer(
         "🤖 Quyidagi bot turlaridan birini tanlang:",
-        reply_markup=bot_type_menu(),
+        reply_markup=bot_type_menu(catalog),
     )
 
 
 @router.callback_query(F.data.startswith("bottype:"))
 async def show_bot_type_details(callback: CallbackQuery, state: FSMContext) -> None:
     bot_key = callback.data.split(":", 1)[1]
-    info = BOT_CATALOG[bot_key]
+    async with get_session() as session:
+        catalog = await get_effective_catalog(session)
+    info = catalog[bot_key]
     await state.update_data(chosen_type=bot_key)
 
     demo_line = f"\n🎬 Demo bot: @{info.demo_username}" if info.demo_username else ""
@@ -48,7 +52,7 @@ async def show_bot_type_details(callback: CallbackQuery, state: FSMContext) -> N
         f"{demo_line}\n\n"
         f"💵 Yaratish narxi: {info.price:,} so'm\n".replace(",", " ")
         + "💰 Oylik to'lov: tarifga qarab belgilanadi\n"
-        + "⚡️ Boshlang'ich bonus: 30 kun"
+        + "⚡️ Boshlang'ich bonus: 3 kun bepul sinov"
     )
     await callback.message.edit_text(text, reply_markup=bot_type_confirm(bot_key, info.price))
     await callback.answer()
@@ -56,9 +60,11 @@ async def show_bot_type_details(callback: CallbackQuery, state: FSMContext) -> N
 
 @router.callback_query(F.data == "back_to_types")
 async def back_to_types(callback: CallbackQuery) -> None:
+    async with get_session() as session:
+        catalog = await get_effective_catalog(session)
     await callback.message.edit_text(
         "🤖 Quyidagi bot turlaridan birini tanlang:",
-        reply_markup=bot_type_menu(),
+        reply_markup=bot_type_menu(catalog),
     )
     await callback.answer()
 
@@ -66,7 +72,19 @@ async def back_to_types(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith("confirm_create:"))
 async def confirm_create(callback: CallbackQuery, state: FSMContext) -> None:
     bot_key = callback.data.split(":", 1)[1]
-    info = BOT_CATALOG[bot_key]
+    async with get_session() as session:
+        catalog = await get_effective_catalog(session)
+    info = catalog[bot_key]
+
+    # Import shu yerda — aylanma import (circular import) bo'lmasligi uchun
+    from bot.child_bots import BOT_TYPE_REGISTRY
+    if bot_key not in BOT_TYPE_REGISTRY:
+        await callback.message.answer(
+            "⚠️ Bu bot turi hali ishlab chiqilmoqda — tez orada tayyor bo'ladi. "
+            "Hozircha boshqa turni tanlang."
+        )
+        await callback.answer()
+        return
 
     async with get_session() as session:
         result = await session.execute(
@@ -110,9 +128,10 @@ async def receive_token(message: Message, state: FSMContext) -> None:
 
     data = await state.get_data()
     bot_key = data["chosen_type"]
-    info = BOT_CATALOG[bot_key]
+    async with get_session() as session:
+        catalog = await get_effective_catalog(session)
+    info = catalog[bot_key]
 
-    # Tokenni tekshirish uchun getMe chaqiramiz
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.get(f"https://api.telegram.org/bot{token}/getMe")
         payload = resp.json()
@@ -150,8 +169,6 @@ async def receive_token(message: Message, state: FSMContext) -> None:
         bot_id = new_bot.id
         await session.commit()
 
-    # Webhook o'rnatish — shu nuqtadan e'tiboran botga kelgan har bir update
-    # bizning /webhook/{bot_id} manzilimizga tushadi (bot/runtime.py qarang)
     webhook_url = f"{PUBLIC_BASE_URL}/webhook/{bot_id}"
     async with httpx.AsyncClient(timeout=10) as client:
         await client.get(
