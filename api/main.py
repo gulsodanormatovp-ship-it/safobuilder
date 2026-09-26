@@ -1,10 +1,9 @@
 """
-FastAPI ilovasi endi UCHTA vazifani bajaradi (Render bepul tarifida
-bitta Web Service ichida ishlashi uchun):
+FastAPI ilovasi Render bepul tarifida bitta Web Service ichida hammasini
+bajaradi:
 
-1. `/platform-webhook` — SafoBuilder (platforma) botining o'zi shu yerga
-   webhook orqali ulanadi (polling emas) — shu tufayli alohida
-   "Background Worker" (pullik xizmat) kerak bo'lmaydi.
+1. `/platform-webhook` — Vezto (platforma) botining o'zi shu yerga webhook
+   orqali ulanadi (polling emas) — alohida "Background Worker" kerak emas.
 2. `/webhook/{bot_id}` — foydalanuvchilar yaratgan child botlar shu yerga tushadi.
 3. `/api/*` — Mini App uchun REST API, `/webapp` — Mini App statik fayllari.
 """
@@ -30,10 +29,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from bot.bot_catalog import BOT_CATALOG
 from bot.child_bots import BOT_TYPE_REGISTRY
-from bot.handlers import bot_settings, create_bot, my_bots, payment, profile, start
+from bot.handlers import admin_panel, bot_settings, create_bot, my_bots, payment, profile, start
 from bot.middlewares import EnsureUserMiddleware
+from bot.platform_settings import get_effective_catalog
 from bot.tariffs import TARIFFS
 from database.db import get_session, init_db
 from database.models import Bot as BotModel, BotStat, Referral, User
@@ -49,11 +48,9 @@ PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "")
 # 200 OK javobini kutib ulgurmasa, xuddi shu update'ni QAYTA yuboradi —
 # natijada bot bir xil xabarni bir necha marta jo'natgandek ko'rinadi.
 # Buning yechimi ikki qavatli:
-#   1) Telegramga DARHOL (hech narsani kutmasdan) 200 OK qaytaramiz va
-#      haqiqiy ishni orqa fonda (BackgroundTasks) bajaramiz.
+#   1) Telegramga DARHOL 200 OK qaytaramiz, haqiqiy ishni orqa fonda bajaramiz.
 #   2) Har bir update_id'ni xotirada belgilab, ikkinchi marta kelsa
-#      butunlay e'tiborsiz qoldiramiz — hatto Telegram baribir qayta
-#      yuborsa ham, xabar ikki marta ketmaydi.
+#      butunlay e'tiborsiz qoldiramiz.
 # ------------------------------------------------------------------
 _seen_update_keys: set[str] = set()
 _seen_update_order: list[str] = []
@@ -73,6 +70,7 @@ def _is_duplicate_update(scope: str, update_id: int | None) -> bool:
         _seen_update_keys.discard(oldest)
     return False
 
+
 app = FastAPI(title="Vezto API")
 app.add_middleware(
     CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
@@ -90,12 +88,15 @@ platform_bot = Bot(
 dp = Dispatcher(storage=MemoryStorage())
 dp.update.outer_middleware(EnsureUserMiddleware())
 
+dp.include_router(admin_panel.router)
 dp.include_router(start.router)
 dp.include_router(create_bot.router)
 dp.include_router(my_bots.router)
 dp.include_router(bot_settings.router)
 dp.include_router(payment.router)
 dp.include_router(profile.router)
+
+platform_bot_username_cache: dict[str, str] = {}
 
 
 @app.on_event("startup")
@@ -192,6 +193,7 @@ async def _process_child_bot_update(bot_id: int, update: dict) -> None:
 
 
 async def _record_activity(bot_id: int, update: dict) -> None:
+    """Statistikani (Mini App dashboardidagi grafik) yangilaydi."""
     today = datetime.utcnow().date()
     async with get_session() as session:
         result = await session.execute(
@@ -217,6 +219,10 @@ async def _record_activity(bot_id: int, update: dict) -> None:
 # ------------------------------------------------------------------
 
 def verify_telegram_webapp_data(init_data: str) -> dict:
+    """
+    Telegram Mini App yuboradigan `initData`ni tekshiradi (rasmiy algoritm:
+    https://core.telegram.org/bots/webapps#validating-data-received-via-the-mini-app).
+    """
     parsed = dict(parse_qsl(init_data))
     received_hash = parsed.pop("hash", None)
     if not received_hash:
@@ -281,143 +287,6 @@ async def bot_stats(bot_id: int, range: str = "today") -> dict:
             for r in rows
         ],
     }
-
-
-@app.get("/api/me")
-async def get_me(init_data: str) -> dict:
-    tg_user = verify_telegram_webapp_data(init_data)
-    async with get_session() as session:
-        result = await session.execute(
-            select(User).where(User.telegram_id == tg_user["id"])
-        )
-        user = result.scalar_one_or_none()
-        if user is None:
-            raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
-
-        bots_result = await session.execute(select(BotModel).where(BotModel.owner_id == user.id))
-        bots = bots_result.scalars().all()
-
-        ref_count_result = await session.execute(
-            select(func.count()).select_from(Referral).where(Referral.referrer_id == user.id)
-        )
-        referral_count = ref_count_result.scalar_one()
-
-    bot_username = platform_bot_username_cache.get("username", "")
-    return {
-        "telegram_id": user.telegram_id,
-        "balance": user.balance,
-        "referral_count": referral_count,
-        "referral_link": f"https://t.me/{bot_username}?start={user.telegram_id}" if bot_username else None,
-        "bots": [
-            {"id": b.id, "username": b.bot_username, "type": b.bot_type,
-             "status": b.status, "tariff": b.tariff,
-             "expires_at": b.expires_at.isoformat() if b.expires_at else None}
-            for b in bots
-        ],
-    }
-
-
-platform_bot_username_cache: dict[str, str] = {}
-
-
-@app.get("/api/catalog")
-async def get_bot_catalog() -> dict:
-    return {
-        "types": [
-            {
-                "key": info.key, "title": info.title, "emoji": info.emoji,
-                "description": info.description, "price": info.price,
-            }
-            for info in BOT_CATALOG.values()
-        ]
-    }
-
-
-class CreateBotRequest(BaseModel):
-    init_data: str
-    bot_type: str
-    token: str
-
-
-@app.post("/api/create-bot")
-async def create_bot_via_miniapp(payload: CreateBotRequest) -> dict:
-    info = BOT_CATALOG.get(payload.bot_type)
-    if info is None:
-        raise HTTPException(status_code=400, detail="Noto'g'ri bot turi")
-
-    tg_user = verify_telegram_webapp_data(payload.init_data)
-
-    async with httpx.AsyncClient(timeout=10) as client:
-        resp = await client.get(f"https://api.telegram.org/bot{payload.token}/getMe")
-        tg_check = resp.json()
-
-    if not tg_check.get("ok"):
-        raise HTTPException(status_code=400, detail="Token noto'g'ri yoki botga ulanib bo'lmadi")
-
-    bot_username = tg_check["result"]["username"]
-    bot_display_name = tg_check["result"]["first_name"]
-
-    async with get_session() as session:
-        user_result = await session.execute(select(User).where(User.telegram_id == tg_user["id"]))
-        user = user_result.scalar_one_or_none()
-        if user is None:
-            raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
-
-        if user.balance < info.price:
-            raise HTTPException(status_code=402, detail="Balans yetarli emas")
-
-        user.balance -= info.price
-        new_bot = BotModel(
-            owner_id=user.id,
-            bot_type=info.key,
-            status="active",
-            bot_token=payload.token,
-            bot_username=bot_username,
-            display_name=bot_display_name,
-            tariff="trial",
-            expires_at=datetime.utcnow() + timedelta(days=3),
-            settings_json=json.dumps({"owner_telegram_id": tg_user["id"]}),
-        )
-        session.add(new_bot)
-        await session.flush()
-        bot_id = new_bot.id
-        await session.commit()
-
-    webhook_url = f"{PUBLIC_BASE_URL}/webhook/{bot_id}"
-    async with httpx.AsyncClient(timeout=10) as client:
-        await client.get(
-            f"https://api.telegram.org/bot{payload.token}/setWebhook",
-            params={"url": webhook_url},
-        )
-
-    return {"ok": True, "bot_id": bot_id, "bot_username": bot_username}
-
-
-@app.get("/api/bots/{bot_id}/anketa-export")
-async def export_anketa(bot_id: int) -> StreamingResponse:
-    async with get_session() as session:
-        result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
-        bot_row = result.scalar_one_or_none()
-
-    if bot_row is None or bot_row.bot_type != "anketa":
-        raise HTTPException(status_code=404, detail="Anketa bot topilmadi")
-
-    settings = json.loads(bot_row.settings_json or "{}")
-    questions = settings.get("questions", [])
-    responses = settings.get("responses", {})
-
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(["user_id", *questions])
-    for user_id, data in responses.items():
-        writer.writerow([user_id, *data.get("answers", [])])
-    buffer.seek(0)
-
-    return StreamingResponse(
-        iter([buffer.getvalue()]),
-        media_type="text/csv",
-        headers={"Content-Disposition": f"attachment; filename=anketa_{bot_id}.csv"},
-    )
 
 
 async def _get_owned_bot(bot_id: int, init_data: str) -> BotModel:
@@ -487,7 +356,7 @@ class UserActionRequest(BaseModel):
 
 @app.post("/api/bots/{bot_id}/block")
 async def block_user_via_miniapp(bot_id: int, payload: UserActionRequest) -> dict:
-    bot_row = await _get_owned_bot(bot_id, payload.init_data)
+    await _get_owned_bot(bot_id, payload.init_data)
     async with get_session() as session:
         result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
         fresh_row = result.scalar_one()
@@ -502,7 +371,7 @@ async def block_user_via_miniapp(bot_id: int, payload: UserActionRequest) -> dic
 
 @app.post("/api/bots/{bot_id}/unblock")
 async def unblock_user_via_miniapp(bot_id: int, payload: UserActionRequest) -> dict:
-    bot_row = await _get_owned_bot(bot_id, payload.init_data)
+    await _get_owned_bot(bot_id, payload.init_data)
     async with get_session() as session:
         result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
         fresh_row = result.scalar_one()
@@ -607,6 +476,119 @@ async def renew_subscription(bot_id: int, payload: RenewRequest) -> dict:
     return {"ok": True, "new_expiry": new_expiry}
 
 
+@app.get("/api/me")
+async def get_me(init_data: str) -> dict:
+    tg_user = verify_telegram_webapp_data(init_data)
+    async with get_session() as session:
+        result = await session.execute(
+            select(User).where(User.telegram_id == tg_user["id"])
+        )
+        user = result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
+
+        bots_result = await session.execute(select(BotModel).where(BotModel.owner_id == user.id))
+        bots = bots_result.scalars().all()
+
+        ref_count_result = await session.execute(
+            select(func.count()).select_from(Referral).where(Referral.referrer_id == user.id)
+        )
+        referral_count = ref_count_result.scalar_one()
+
+    bot_username = platform_bot_username_cache.get("username", "")
+    return {
+        "telegram_id": user.telegram_id,
+        "balance": user.balance,
+        "referral_count": referral_count,
+        "referral_link": f"https://t.me/{bot_username}?start={user.telegram_id}" if bot_username else None,
+        "bots": [
+            {"id": b.id, "username": b.bot_username, "type": b.bot_type,
+             "status": b.status, "tariff": b.tariff,
+             "expires_at": b.expires_at.isoformat() if b.expires_at else None}
+            for b in bots
+        ],
+    }
+
+
+@app.get("/api/catalog")
+async def get_bot_catalog() -> dict:
+    async with get_session() as session:
+        catalog = await get_effective_catalog(session)
+    return {
+        "types": [
+            {
+                "key": info.key, "title": info.title, "emoji": info.emoji,
+                "description": info.description, "price": info.price,
+            }
+            for info in catalog.values()
+        ]
+    }
+
+
+class CreateBotRequest(BaseModel):
+    init_data: str
+    bot_type: str
+    token: str
+
+
+@app.post("/api/create-bot")
+async def create_bot_via_miniapp(payload: CreateBotRequest) -> dict:
+    async with get_session() as session:
+        catalog = await get_effective_catalog(session)
+    info = catalog.get(payload.bot_type)
+    if info is None:
+        raise HTTPException(status_code=400, detail="Noto'g'ri bot turi")
+    if payload.bot_type not in BOT_TYPE_REGISTRY:
+        raise HTTPException(status_code=400, detail="Bu bot turi hali ishlab chiqilmoqda")
+
+    tg_user = verify_telegram_webapp_data(payload.init_data)
+
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.get(f"https://api.telegram.org/bot{payload.token}/getMe")
+        tg_check = resp.json()
+
+    if not tg_check.get("ok"):
+        raise HTTPException(status_code=400, detail="Token noto'g'ri yoki botga ulanib bo'lmadi")
+
+    bot_username = tg_check["result"]["username"]
+    bot_display_name = tg_check["result"]["first_name"]
+
+    async with get_session() as session:
+        user_result = await session.execute(select(User).where(User.telegram_id == tg_user["id"]))
+        user = user_result.scalar_one_or_none()
+        if user is None:
+            raise HTTPException(status_code=404, detail="Foydalanuvchi topilmadi")
+
+        if user.balance < info.price:
+            raise HTTPException(status_code=402, detail="Balans yetarli emas")
+
+        user.balance -= info.price
+        new_bot = BotModel(
+            owner_id=user.id,
+            bot_type=info.key,
+            status="active",
+            bot_token=payload.token,
+            bot_username=bot_username,
+            display_name=bot_display_name,
+            tariff="trial",
+            expires_at=datetime.utcnow() + timedelta(days=3),
+            settings_json=json.dumps({"owner_telegram_id": tg_user["id"]}),
+        )
+        session.add(new_bot)
+        await session.flush()
+        bot_id = new_bot.id
+        await session.commit()
+
+    webhook_url = f"{PUBLIC_BASE_URL}/webhook/{bot_id}"
+    async with httpx.AsyncClient(timeout=10) as client:
+        await client.get(
+            f"https://api.telegram.org/bot{payload.token}/setWebhook",
+            params={"url": webhook_url},
+        )
+
+    return {"ok": True, "bot_id": bot_id, "bot_username": bot_username}
+
+
 @app.get("/api/bots/{bot_id}/kino/movies")
 async def list_kino_movies(bot_id: int, init_data: str) -> dict:
     bot_row = await _get_owned_bot(bot_id, init_data)
@@ -638,6 +620,34 @@ async def delete_kino_movie(bot_id: int, payload: DeleteMovieRequest) -> dict:
         fresh_row.settings_json = json.dumps(settings)
         await session.commit()
     return {"ok": True}
+
+
+@app.get("/api/bots/{bot_id}/anketa-export")
+async def export_anketa(bot_id: int) -> StreamingResponse:
+    """Anketa Bot javoblarini CSV holida eksport qiladi."""
+    async with get_session() as session:
+        result = await session.execute(select(BotModel).where(BotModel.id == bot_id))
+        bot_row = result.scalar_one_or_none()
+
+    if bot_row is None or bot_row.bot_type != "anketa":
+        raise HTTPException(status_code=404, detail="Anketa bot topilmadi")
+
+    settings = json.loads(bot_row.settings_json or "{}")
+    questions = settings.get("questions", [])
+    responses = settings.get("responses", {})
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["user_id", *questions])
+    for user_id, data in responses.items():
+        writer.writerow([user_id, *data.get("answers", [])])
+    buffer.seek(0)
+
+    return StreamingResponse(
+        iter([buffer.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename=anketa_{bot_id}.csv"},
+    )
 
 
 @app.get("/")
