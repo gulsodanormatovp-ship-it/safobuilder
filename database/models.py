@@ -149,3 +149,13 @@ class Referral(Base):
     referred_id: Mapped[int] = mapped_column(ForeignKey("users.id"), unique=True)
     bonus_amount: Mapped[int] = mapped_column(Integer, default=500)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class PlatformSetting(Base):
+    """Butun platformaga tegishli kalit-qiymat sozlamalari (karta, majburiy
+    obuna, narx o'zgarishlari, admin qo'shgan yangi bot turlari) — admin
+    panel orqali o'zgartirilganda serverni qayta deploy qilish shart emas."""
+    __tablename__ = "platform_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
