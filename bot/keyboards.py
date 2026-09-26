@@ -1,12 +1,9 @@
-import os
-
 from aiogram.types import (
     InlineKeyboardButton, InlineKeyboardMarkup,
     KeyboardButton, ReplyKeyboardMarkup,
 )
 
-PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "https://sizning-domen.uz").rstrip("/")
-WEBAPP_BASE_URL = f"{PUBLIC_BASE_URL}/webapp"
+WEBAPP_BASE_URL = "https://sizning-domen.uz/webapp"
 
 # ---- Asosiy menyu (screenshotlardagi 8 tugmali reply-klaviatura) ----
 MAIN_MENU = ReplyKeyboardMarkup(
@@ -19,27 +16,15 @@ MAIN_MENU = ReplyKeyboardMarkup(
     resize_keyboard=True,
 )
 
-# ---- Bot turlarini tanlash ----
-BOT_TYPE_LABELS = {
-    "kino": "🎬 Kino Bot",
-    "pul": "💰 Pul Bot",
-    "openbudget": "📦 OpenBudget Bot",
-    "nakrutka": "🚀 Nakrutka Bot",
-    "vipkanal": "🔐 VipKanal Bot",
-    "aloqa": "📞 Aloqa Bot",
-    "taxi": "🚕 Taxi Bot",
-    "anketa": "📝 Anketa Bot",
-    "kafe_pos": "🍽 Kafe POS Bot",
-    "konkurs": "🏆 Konkurs Bot",
-    "viktorina": "🎉 Viktorina Bot",
-    "dokon": "🛒 Do'kon Bot",
-}
 
-
-def bot_type_menu() -> InlineKeyboardMarkup:
+def bot_type_menu(catalog: dict) -> InlineKeyboardMarkup:
+    """
+    `catalog` — {key: BotTypeInfo} lug'ati (platform_settings.get_effective_catalog
+    orqali olinadi, admin panelda o'zgartirilgan narx/turlarni ham o'z ichiga oladi).
+    """
     rows, row = [], []
-    for i, (key, label) in enumerate(BOT_TYPE_LABELS.items(), start=1):
-        row.append(InlineKeyboardButton(text=label, callback_data=f"bottype:{key}"))
+    for i, (key, info) in enumerate(catalog.items(), start=1):
+        row.append(InlineKeyboardButton(text=f"{info.emoji} {info.title}", callback_data=f"bottype:{key}"))
         if i % 2 == 0:
             rows.append(row)
             row = []
