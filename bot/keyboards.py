@@ -3,7 +3,9 @@ from aiogram.types import (
     KeyboardButton, ReplyKeyboardMarkup,
 )
 
-WEBAPP_BASE_URL = "https://sizning-domen.uz/webapp"
+# Base URL-er for plattformen
+PUBLIC_BASE_URL = "https://safobuilder.pythonanywhere.com"
+WEBAPP_BASE_URL = "https://safobuilder.pythonanywhere.com/webapp"
 
 # ---- Asosiy menyu (screenshotlardagi 8 tugmali reply-klaviatura) ----
 MAIN_MENU = ReplyKeyboardMarkup(
