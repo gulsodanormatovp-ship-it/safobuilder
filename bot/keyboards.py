@@ -3,11 +3,9 @@ from aiogram.types import (
     KeyboardButton, ReplyKeyboardMarkup,
 )
 
-# Platforma uchun asosiy URL-manzillar
-PUBLIC_BASE_URL = "https://safobuilder.pythonanywhere.com"
-WEBAPP_BASE_URL = "https://safobuilder.pythonanywhere.com/webapp"
+WEBAPP_BASE_URL = "https://sizning-domen.uz/webapp"
 
-# ---- Asosiy menyu ----
+# ---- Asosiy menyu (screenshotlardagi 8 tugmali reply-klaviatura) ----
 MAIN_MENU = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="➕ Bot yaratish"), KeyboardButton(text="🤖 Botlarim")],
@@ -20,6 +18,10 @@ MAIN_MENU = ReplyKeyboardMarkup(
 
 
 def bot_type_menu(catalog: dict) -> InlineKeyboardMarkup:
+    """
+    `catalog` — {key: BotTypeInfo} lug'ati (platform_settings.get_effective_catalog
+    orqali olinadi, admin panelda o'zgartirilgan narx/turlarni ham o'z ichiga oladi).
+    """
     rows, row = [], []
     for i, (key, info) in enumerate(catalog.items(), start=1):
         row.append(InlineKeyboardButton(text=f"{info.emoji} {info.title}", callback_data=f"bottype:{key}"))
@@ -51,6 +53,7 @@ def payment_methods_menu() -> InlineKeyboardMarkup:
 
 
 def admin_payment_review(payment_id: int) -> InlineKeyboardMarkup:
+    """To'lov chekini tasdiqlash uchun admin guruhiga yuboriladigan tugmalar."""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="✅ Tasdiqlash", callback_data=f"admin_approve:{payment_id}"),
          InlineKeyboardButton(text="❌ Rad etish", callback_data=f"admin_reject:{payment_id}")],
@@ -58,6 +61,7 @@ def admin_payment_review(payment_id: int) -> InlineKeyboardMarkup:
 
 
 def my_bots_menu(bots: list[tuple[int, str, str]]) -> InlineKeyboardMarkup:
+    """bots: [(bot_id, display_name, status_emoji), ...]"""
     rows = [
         [InlineKeyboardButton(text=f"{status} @{name}", callback_data=f"managebot:{bot_id}")]
         for bot_id, name, status in bots
